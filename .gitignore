@@ -1,0 +1,35 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Local stores (TargetStore)
+*.db
+*.sqlite3
+
+# Reports produced by a local run
+report.json
+*.sarif
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.benchmarks/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

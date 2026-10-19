@@ -1,0 +1,22 @@
+# MCP servers the SDK may connect to (Layer 5).
+#
+# Transport per server is part of the partner contract: stdio servers are
+# started by us, HTTP servers are started by whoever owns them. Swapping our
+# reference server for a partner's is a change in this file and nowhere else.
+
+servers:
+  # Our own reference server. Always available, no partner dependency.
+  - name: websec-tools
+    transport: stdio
+    command: python
+    args: ["-m", "mcp_servers.websec_tools.server"]
+    cwd: "."
+    startup_timeout_s: 30
+    enabled: true
+
+  # Partner's server. Fill in once the transport is agreed.
+  - name: partner-websec
+    transport: stdio
+    command: python
+    args: ["-m", "partner_tools.server"]
+    enabled: false

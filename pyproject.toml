@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "websecuritycheck"
+version = "0.1.0"
+description = "A typed SDK for agentic web-security checks, built on Strands Agents."
+requires-python = ">=3.11"
+dependencies = [
+    "strands-agents>=1.58",
+    "mcp>=2.1",
+    "httpx>=0.28",
+    "cryptography>=46",
+    "pydantic>=2.11",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.14"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/websecuritycheck"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "mcp_servers", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
