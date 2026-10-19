@@ -23,7 +23,7 @@ dev = ["pytest>=8", "ruff>=0.14"]
 packages = ["src/websecuritycheck"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "tests"]
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -32,3 +32,7 @@ src = ["src", "mcp_servers", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+# `_builders` is the test suite's own helper module, not a dependency.
+known-first-party = ["websecuritycheck", "mcp_servers", "_builders"]
