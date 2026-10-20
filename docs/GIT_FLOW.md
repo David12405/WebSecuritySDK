@@ -23,14 +23,15 @@ integrates; `main` is what a developer outside the team would install.
 | `release/v0.x` | only if a release needs patching while `dev` moves on | Cut from the tag. Not expected in v0.1. |
 
 ```
-feat/policy-scope-guard ──┐
-feat/tools-mcp-client ────┼──► dev ──(release PR)──► main ──► tag v0.1.0
-docs/architecture ────────┘      ▲                     │
-                                 └──── hotfix back-merge ┘
+feat/mcp-servers-recon-tools ──┐
+feat/policy-scope-guard       ─┤
+feat/tools-mcp-client         ─┼──► dev ──(release PR)──► main ──► tag v0.1.0
+docs/architecture             ─┘       ▲                     │
+                                       └──── hotfix back-merge ┘
 ```
 
-A work branch older than three days is a signal the work was not cut small
-enough — split it, or rebase it onto `dev`.
+The L6 recon capability is intentionally kept in one feature branch so its
+tools, direct verification runner and contract tests are reviewed together.
 
 **Why `dev` and not plain trunk.** Two people land into the same layers, and
 the partner's MCP server moves on its own schedule. `dev` is the place where a
@@ -61,8 +62,8 @@ chore/ci-ruff-pytest
 
 The area is the folder from the architecture map — `checker`, `checks`,
 `engine`, `policy`, `tools`, `memory`, `results`, `telemetry`, `skills`,
-`mcp-servers`, `docs`, `ci`. One branch touching three layers usually wants to
-be three branches.
+`mcp-servers`, `docs`, `ci`. The L6 recon branch is an explicit exception:
+all ten tools, their direct runner and their tests stay together.
 
 ---
 
@@ -240,12 +241,10 @@ moment it lands.
 |---|---|---|
 | 1 | `chore/ci-ruff-pytest` | CI green on an empty suite |
 | 2 | `feat/results-models` | `Finding`, `ErrorInfo`, `CheckOutput`, `CheckResult` + status rules |
-| 3 | `feat/mcp-servers-probes` | the four passive probes, no MCP yet |
-| 4 | `feat/mcp-servers-server` | the probes served over stdio MCP |
-| 5 | `feat/policy-scope-guard` | `in_scope()` as a pure function + its tests |
-| 6 | `feat/tools-mcp-client` | server discovery, allowlist, dead-server handling |
-| 7 | `feat/examples-probe-target` | the no-model end-to-end path through Layers 3, 5, 6 |
-| 8 | `feat/checks-and-engine` | `Check`, the registry, `runner.py`, first live agent run |
+| 3 | `feat/mcp-servers-recon-tools` | all 10 L6 tools, parsers/models, FastMCP registration, direct runner and offline tests |
+| 4 | `feat/policy-scope-guard` | `in_scope()` as a pure function + its tests |
+| 5 | `feat/tools-mcp-client` | server discovery, allowlist, dead-server handling |
+| 6 | `feat/checks-and-engine` | `Check`, the registry, `runner.py`, first live agent run |
 
-Only after #8 does the rest of the policy layer — injection guard, retry,
+Only after #6 does the rest of the policy layer — injection guard, retry,
 output validator, steering — have a real run to attach to.
