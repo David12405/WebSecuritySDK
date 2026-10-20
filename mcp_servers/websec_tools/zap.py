@@ -307,7 +307,12 @@ async def passive_web_analysis(
                     raise ToolError("E_TIMEOUT", "ZAP passive scanner timed out")
                 await asyncio.sleep(ZAP_POLL_SECONDS)
             alerts_response = await client.get(
-                "/JSON/alerts/view/alerts/", {"baseurl": _origin(target)[0]}
+                "/JSON/core/view/alerts/",
+                {
+                    "baseurl": _origin(target)[0],
+                    "start": 0,
+                    "count": MAX_SIGNALS + 1,
+                },
             )
         finally:
             await _remove_context(client, context_name)
