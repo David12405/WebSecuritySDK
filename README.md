@@ -18,10 +18,19 @@ result.errors     # failures of the SDK, a tool, or the model
 result.trace      # every step the agent took
 ```
 
-> **Status: init.** This repository currently holds the folder skeleton and the
-> contracts. Every module carries a docstring naming its job and the step of
-> the turn diagram it serves; none of them have an implementation yet. Nothing
-> below runs.
+> **Status: week 2 of 8.** The tool path and the policy layer work; the agent
+> loop does not exist yet, so `SecurityChecker` above is still a stub. What
+> runs today, with no model credentials:
+>
+> | | |
+> |---|---|
+> | Four passive probes, served over MCP | `mcp_servers/websec_tools/` |
+> | Scope guard + tool allowlist, with the `BeforeToolCall` hook | `policy/scope_guard.py` |
+> | Injection guard, with the `AfterToolCall` hook | `policy/injection_guard.py` |
+> | Result schemas, status rules, JSON and SARIF export | `results/` |
+> | Two runnable demos | `examples/` |
+>
+> `pytest` is 179 tests with no network and no model.
 
 ---
 
@@ -38,25 +47,32 @@ result.trace      # every step the agent took
 
 ---
 
-## Install (once there is something to install)
+## Install
 
 ```bash
 pip install -e ".[dev]"
-cp .env.example .env     # then fill in the key for your provider
+cp .env.example .env     # only needed for a full agent run, later
 ```
+
+The examples import the package, so the editable install is the one setup
+step. Without it they fail with `ModuleNotFoundError: websecuritycheck`.
 
 ## Run
 
 ```bash
-# investigate a site through the MCP tools — no model needed
+# probe a site through a real MCP subprocess — no model needed
 python examples/probe_target.py https://example.com
+python examples/probe_target.py https://example.com --scope https://other.test  # watch it block
+python examples/probe_target.py https://example.com --json report.json
 
-# one full agent run — needs model credentials
-python examples/run_check.py https://example.com --check headers
+# watch the policy hooks decide, on hand-built events — no network either
+python examples/inspect_hooks.py
 
 # tests: no network, no model
 pytest
 ```
+
+`examples/run_check.py` — one full agent run — is not written yet.
 
 ---
 
