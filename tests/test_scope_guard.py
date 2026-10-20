@@ -6,11 +6,13 @@ No network, no model. Rule numbers refer to ARCHITECTURE.md section 6.
 from __future__ import annotations
 
 import pytest
+from strands.hooks import BeforeToolCallEvent, HookOrder
 
 from websecuritycheck.memory.context import FRAMEWORK_TOOLS, framework_tools_for
 from websecuritycheck.policy.scope_guard import (
     MAX_QUOTED_CHARS,
     ScopeEntry,
+    ScopeGuard,
     guard_tool_call,
     in_scope,
     normalize_scope,
@@ -413,3 +415,97 @@ def test_subdomains_reach_the_scope_decision() -> None:
     call = {"target": "https://api.myapp.com"}
     assert not guard(call)
     assert guard(call, allow_subdomains=True)
+
+
+def test_non_object_arguments_are_refused() -> None:
+    """Strands types `ToolUse.input` as `Any`, and the model fills it."""
+    for bad in ["https://myapp.com", ["https://myapp.com"], 7, None]:
+        decision = guard(bad)
+        assert not decision
+        assert "scope-checked" in decision.reason
+
+
+# --------------------------------------------------------------------------
+# The hook
+# --------------------------------------------------------------------------
+
+
+def event(name: str = "get_response_headers", tool_input=None) -> BeforeToolCallEvent:
+    return BeforeToolCallEvent(
+        agent=None,
+        selected_tool=None,
+        tool_use={
+            "name": name,
+            "input": {"target": "https://myapp.com"} if tool_input is None else tool_input,
+            "toolUseId": "tu-1",
+        },
+        invocation_state={},
+    )
+
+
+def hook(**kw) -> ScopeGuard:
+    kw.setdefault("allowlist", ["get_response_headers"])
+    kw.setdefault("scope", SCOPE)
+    return ScopeGuard(**kw)
+
+
+def test_an_allowed_call_is_left_alone() -> None:
+    guard_hook, e = hook(), event()
+    guard_hook.before_tool_call(e)
+    assert e.cancel_tool is False
+    assert guard_hook.errors == []
+
+
+def test_a_blocked_call_is_cancelled_with_the_reason() -> None:
+    """The message becomes the tool result, so the model sees why it was blocked."""
+    guard_hook = hook()
+    e = event(tool_input={"target": "https://evil.com"})
+    guard_hook.before_tool_call(e)
+    assert e.cancel_tool == "host 'evil.com' is not in scope"
+
+
+def test_a_block_is_recorded_as_a_scope_error() -> None:
+    guard_hook = hook()
+    guard_hook.before_tool_call(event(tool_input={"target": "https://evil.com"}))
+    guard_hook.before_tool_call(event(name="get_cookies"))
+    assert [err.kind for err in guard_hook.errors] == ["scope", "scope"]
+    assert [err.tool for err in guard_hook.errors] == ["get_response_headers", "get_cookies"]
+
+
+def test_the_hook_never_raises_on_model_input() -> None:
+    """A guard that throws behaves however Strands treats an exception in a hook."""
+    guard_hook = hook()
+    for bad in [{}, {"target": None}, "not-a-dict", {"target": ["a", "b"]}]:
+        e = event(tool_input=bad)
+        guard_hook.before_tool_call(e)
+        assert isinstance(e.cancel_tool, str)
+    assert len(guard_hook.errors) == 4
+
+
+def test_the_hook_exempts_framework_tools() -> None:
+    guard_hook = hook(exempt=framework_tools_for("CheckOutput"))
+    e = event(name="CheckOutput", tool_input={"findings": []})
+    guard_hook.before_tool_call(e)
+    assert e.cancel_tool is False
+
+
+def test_the_scope_is_parsed_once_at_construction() -> None:
+    """A bad scope is the developer's bug, so it surfaces before any tool runs."""
+    with pytest.raises(ValueError, match="no scheme"):
+        hook(scope=["myapp.com"])
+    assert all(isinstance(entry, ScopeEntry) for entry in hook().scope)
+
+
+def test_the_hook_registers_before_the_default_order() -> None:
+    """Nothing should steer a call that is about to be cancelled."""
+    registered: list[tuple] = []
+
+    class FakeRegistry:
+        def add_callback(self, event_type, callback, *, order=0):
+            registered.append((event_type, callback, order))
+
+    hook().register_hooks(FakeRegistry())
+    assert len(registered) == 1
+    event_type, _, order = registered[0]
+    assert event_type is BeforeToolCallEvent
+    assert order < HookOrder.DEFAULT

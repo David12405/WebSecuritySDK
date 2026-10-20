@@ -1,20 +1,21 @@
 """Hard rule - may this call touch this target?
 
-Three pure decisions live here, and a thin Strands hook will call the last
-of them once there is an agent to attach it to:
+Three pure decisions, and one thin hook that applies them:
 
     in_scope(target, scope)        is this URL one the developer owns?
     tool_allowed(name, allowlist)  is this tool one this check may use?
     guard_tool_call(name, input)   both of the above, on one proposed call
+    ScopeGuard                     BeforeToolCall - the only Strands-shaped part
 
-Pure on purpose. The decision has to be testable without an agent, reusable
-by `examples/probe_target.py` with no model in the loop, and identical in
-both places - a scope policy that only applies inside the agent loop is a
-scope policy with a hole in it.
+The split is the point. The decision has to be testable without an agent,
+reusable by `examples/probe_target.py` with no model in the loop, and
+identical in both places - a scope policy that only applies inside the agent
+loop is a scope policy with a hole in it. So everything that needs thinking
+about is a function over plain values, and `ScopeGuard` does nothing but
+translate a `ScopeDecision` into Strands' words.
 
-Neither function raises on a refusal. A refusal is an ordinary outcome that
-the caller turns into `event.cancel_tool` plus an `ErrorInfo(kind="scope")`,
-and `reason` is written to be read by whoever gets that report.
+No decision raises on a refusal. A refusal is an ordinary outcome, and
+`reason` is written to be read by whoever gets the report.
 
 A bad *scope* is different: that is the developer's own configuration, wrong
 before any target is involved, so `normalize_scope` raises `ValueError`
@@ -24,9 +25,13 @@ rather than quietly matching nothing.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
+
+from strands.hooks import BeforeToolCallEvent, HookRegistry
+
+from ..results.models import ErrorInfo
 
 ALLOWED_SCHEMES = frozenset({"http", "https"})
 
@@ -241,7 +246,7 @@ def tool_allowed(
 
 def guard_tool_call(
     name: str,
-    tool_input: Mapping[str, Any],
+    tool_input: Any,
     *,
     allowlist: Iterable[str],
     scope: Sequence[str] | Sequence[ScopeEntry],
@@ -275,6 +280,15 @@ def guard_tool_call(
     if not allowed:
         return allowed
 
+    # `ToolUse.input` is typed `Any` by Strands, and it is filled by the
+    # model, so it is not necessarily a mapping at all.
+    if not isinstance(tool_input, Mapping):
+        return ScopeDecision(
+            False,
+            f"tool {_quote(name)!r} was called with {type(tool_input).__name__} arguments "
+            "instead of an object, so the call cannot be scope-checked",
+        )
+
     if "target" not in tool_input:
         return ScopeDecision(
             False,
@@ -293,6 +307,54 @@ def guard_tool_call(
         return ScopeDecision(False, f"tool {_quote(name)!r} was called with an empty target")
 
     return in_scope(target, scope, allow_subdomains)
+
+
+# --------------------------------------------------------------------------
+# The hook
+# --------------------------------------------------------------------------
+
+
+#: Lower runs first. Below `HookOrder.DEFAULT`, so the guard decides before
+#: our other before-tool hooks - there is no point steering a call that is
+#: about to be cancelled - but outside the SDK_FIRST/SDK_LAST bands Strands
+#: keeps for its own internals.
+SCOPE_GUARD_ORDER = -10
+
+
+@dataclass
+class ScopeGuard:
+
+
+    allowlist: Sequence[str]
+    scope: Sequence[str] | Sequence[ScopeEntry]
+    exempt: Iterable[str] = ()
+    allow_subdomains: bool = False
+    errors: list[ErrorInfo] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Parse the scope once per run rather than once per tool call, and
+        # raise here - at construction - if the developer's scope is wrong,
+        # rather than on the first tool call of a run already paid for.
+        self.scope = _entries(self.scope)
+        self.exempt = frozenset(self.exempt)
+
+    def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
+        registry.add_callback(BeforeToolCallEvent, self.before_tool_call, order=SCOPE_GUARD_ORDER)
+
+    def before_tool_call(self, event: BeforeToolCallEvent) -> None:
+        name = event.tool_use.get("name") or ""
+        decision = guard_tool_call(
+            name,
+            event.tool_use.get("input"),
+            allowlist=self.allowlist,
+            scope=self.scope,
+            exempt=self.exempt,
+            allow_subdomains=self.allow_subdomains,
+        )
+        if decision:
+            return
+        event.cancel_tool = decision.reason
+        self.errors.append(ErrorInfo(kind="scope", message=decision.reason, tool=name or None))
 
 
 # --------------------------------------------------------------------------
