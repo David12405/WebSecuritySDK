@@ -188,7 +188,16 @@ result.
 
 ### 5.3 Tool errors
 
-An MCP `isError` result whose text begins with a stable code.
+An MCP `isError` result whose text **contains** a stable code as its first
+word after any framework prefix.
+
+> **Amended 2026-10-20, needs the partner's confirmation.** This said "begins
+> with a stable code" until the first live server run. The MCP SDK prefixes
+> every tool error with `Error executing tool <name>: `, including a
+> deliberate `ToolError` whose message the server chose, so the code can
+> never be first on the wire. `policy/errors.code_of()` finds the first
+> declared code anywhere in the text; an undeclared `E_*` spelling is
+> reported as `E_INTERNAL` rather than guessed at.
 
 | Code | Meaning | Retry? |
 |---|---|---|

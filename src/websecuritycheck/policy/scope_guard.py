@@ -323,8 +323,6 @@ SCOPE_GUARD_ORDER = -10
 
 @dataclass
 class ScopeGuard:
-
-
     allowlist: Sequence[str]
     scope: Sequence[str] | Sequence[ScopeEntry]
     exempt: Iterable[str] = ()
