@@ -129,7 +129,7 @@ def _validate_target(target: str) -> None:
     try:
         parsed = urlsplit(target)
         hostname = parsed.hostname
-        parsed.port
+        port = parsed.port
     except (TypeError, ValueError):
         raise ProbeError("E_INVALID_TARGET", "target is not a valid URL") from None
     if (
@@ -137,6 +137,7 @@ def _validate_target(target: str) -> None:
         or not hostname
         or parsed.username
         or parsed.password
+        or (port is not None and not 1 <= port <= 65535)
         or any(char.isspace() or ord(char) < 32 for char in target)
     ):
         raise ProbeError("E_INVALID_TARGET", "target must be an absolute HTTP(S) URL")
