@@ -255,14 +255,19 @@ synchronized with the Layer 5 MCP client.
 
 ### 5.6 Result schema
 
+Implemented in `results/models.py`.
+
 ```python
-class Finding(BaseModel):
-    id: str              # stable across runs, so runs can be diffed
+class FindingDraft(BaseModel):     # what the MODEL fills, extra="forbid"
     title: str
     severity: Literal["info", "low", "medium", "high", "critical"]
     location: str        # URL, header name, cookie name ...
     evidence: str        # quoted from a tool result in THIS run
     remediation: str
+    source_tool: str     # which tool the evidence came from, "" if unattributed
+
+class Finding(FindingDraft):       # what the DEVELOPER gets
+    id: str              # stable across runs, so runs can be diffed
     tool_refs: list[str] # trace step ids this finding rests on
 
 class ErrorInfo(BaseModel):
@@ -270,6 +275,7 @@ class ErrorInfo(BaseModel):
     message: str
     tool: str | None
     code: str | None     # E_TIMEOUT, ...
+    step_ref: str | None # the trace step it came from, when it came from one
 
 class CheckResult(BaseModel):
     check: str
@@ -277,9 +283,24 @@ class CheckResult(BaseModel):
     status: Literal["passed", "issues_found", "failed", "partial"]
     findings: list[Finding]
     errors: list[ErrorInfo]
-    diff: RunDiff | None     # new / fixed / unchanged since the last run
+    diff: RunDiff | None     # new / fixed / unchanged / unverified
     trace: list[TraceStep]
+    run_id: str
+    started_at: datetime | None
+    finished_at: datetime | None
 ```
+
+**Why `id` and `tool_refs` are not in the draft.** The model fills the draft,
+and neither field is something a model can produce: an id has to be identical
+across two runs or the diff is noise, and trace step ids are assigned by the
+harness after the fact. `Finding.from_draft()` adds both. Design rule 6 is
+enforced the same way — `CheckOutput` has no `status` field and forbids extra
+keys, so the model has no way to express one.
+
+**`RunDiff.unverified`.** A finding that was present last run and could not be
+re-checked this run, because the tool that would have found it failed, is not
+a finding that was *fixed*. Without that bucket the diff reports a failure as
+an improvement.
 
 | findings | errors | status |
 |---|---|---|

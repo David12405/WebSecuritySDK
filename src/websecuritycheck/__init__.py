@@ -11,3 +11,7 @@ else in this package is internal and may change without notice.
 INIT: exports only. Re-export SecurityChecker, CheckResult, Finding, ErrorInfo
 once those modules carry an implementation.
 """
+
+#: Reported in every SARIF export, so a report says which SDK produced it.
+#: Kept in step with `version` in pyproject.toml.
+__version__ = "0.1.0"

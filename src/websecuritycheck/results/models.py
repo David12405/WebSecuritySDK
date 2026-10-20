@@ -1,20 +1,381 @@
 """Finding, ErrorInfo, TraceStep, RunDiff, CheckOutput, CheckResult.
 
-`CheckOutput` is what the *model* returns - findings and notes only.
-`CheckResult` is what the *developer* gets - the harness adds status, errors,
-diff and trace. Keeping the two apart is what makes "findings and errors
-never mix" enforceable rather than advisory.
+Two audiences, and keeping them apart is the whole point of this module.
 
-Status rules:
+**The model, inside the loop.** It fills `CheckOutput` - drafts of findings
+and nothing else. It cannot set a status, cannot write a trace, and cannot
+invent a finding id. Everything it is not allowed to decide is simply absent
+from the schema it is shown, so "the model never sets status" stops being a
+rule somebody has to remember and becomes a thing that cannot be expressed.
 
-    findings  errors   status
-    none      none     passed         - only if at least one tool ran
-    some      none     issues_found
-    some      some     partial
-    none      some     failed
+**The developer, after the run.** They get `CheckResult`: the findings, the
+errors, the trace of what actually happened, and the diff against the last
+run. The harness fills in everything the model was not allowed to touch.
 
-A run that called no tool is never `passed`: it measured nothing, so an empty
-findings list is the absence of evidence, not evidence of absence.
-
-INIT: no implementation yet.
+The trace is what makes the other three readable. The output of this SDK is a
+report, not a conversation - nobody asks the agent afterwards what it did, so
+the report has to answer on its own: which tools ran, which calls were
+blocked, which failed, which answers were sent back. Without it
+`status="partial"` is a word with no content.
 """
+
+from __future__ import annotations
+
+import hashlib
+import re
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# --------------------------------------------------------------------------
+# Vocabularies
+# --------------------------------------------------------------------------
+
+Severity = Literal["info", "low", "medium", "high", "critical"]
+
+#: High-to-low ordering for reports. A report that lists a cookie note above a
+#: missing HSTS header buries the thing the reader opened it for.
+SEVERITY_RANK: dict[Severity, int] = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "info": 0,
+}
+
+ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection"]
+
+Status = Literal["passed", "issues_found", "failed", "partial"]
+
+StepKind = Literal[
+    "model_call",  # one turn of the agent loop
+    "tool_call",  # a tool ran, with its outcome
+    "cancelled",  # a hook refused the call before it ran
+    "retry",  # a transient failure, tried again
+    "skill_loaded",  # the SKILL.md for this check entered the prompt
+    "steering",  # an answer was sent back, with the reason
+    "output",  # the final structured answer
+]
+
+StepStatus = Literal["ok", "error", "cancelled"]
+
+#: No raw target content in a trace. A summary is written by our code, and is
+#: cut here rather than at the call site, so there is one place to check.
+MAX_SUMMARY_CHARS = 300
+
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+# --------------------------------------------------------------------------
+# What the model produces
+# --------------------------------------------------------------------------
+
+
+class FindingDraft(BaseModel):
+    """One problem in the target, as the model reports it.
+
+    This is the model-facing half, and it is deliberately missing two fields
+    the public `Finding` has:
+
+    `id` - it has to be stable across runs or the diff is meaningless, and a
+    model asked for an identifier produces a different one every time.
+    `stable_id()` derives it instead.
+
+    `tool_refs` - these are trace step ids, which the harness assigns. The
+    model never sees them, so asking for them would only invite invention.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    severity: Severity
+    location: str = Field(min_length=1, description="URL, header name, cookie name ...")
+    evidence: str = Field(
+        min_length=1,
+        description="Quoted from a tool result in THIS run. Not a restatement of the title.",
+    )
+    remediation: str = Field(min_length=1)
+    source_tool: str = Field(
+        default="",
+        description="Name of the tool the evidence was quoted from, if it came from one tool.",
+    )
+
+
+class CheckOutput(BaseModel):
+    """The model's entire contribution - the structured-output schema.
+
+    `extra="forbid"` is load-bearing. Without it a model that has seen enough
+    security reports will helpfully add `"status": "passed"`, and a later
+    refactor that trusts the field would hand the model a way to declare a
+    target clean. There is no status here and there is no room for one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[FindingDraft] = Field(default_factory=list)
+    notes: str = Field(
+        default="",
+        description="What was checked and what could not be. Never a substitute for a finding.",
+    )
+
+
+# --------------------------------------------------------------------------
+# What the harness produces
+# --------------------------------------------------------------------------
+
+
+def slug(text: str) -> str:
+    """Lowercase, alphanumerics and single dashes. Used for ids."""
+    return _SLUG.sub("-", text.lower()).strip("-")
+
+
+def stable_id(check: str, location: str, title: str) -> str:
+    """A finding id that survives between runs, so two runs can be diffed.
+
+    Derived from what the finding is *about* rather than from how it was
+    worded this time: the check, the location, and a slug of the title.
+
+    Known limit: a model that rewords a title between runs - "CSP header
+    missing" then "no Content-Security-Policy" - produces a different id, and
+    the diff reads it as one finding fixed and another appeared. Location is
+    the stable part, title is not, and the pair is still the best key
+    available without a curated rule catalog. When the checks grow their own
+    rule ids, this becomes `check:rule:location` and the problem disappears.
+    """
+    key = f"{slug(check)}|{location.strip().lower()}|{slug(title)}"
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
+class Finding(FindingDraft):
+    """A finding as the developer receives it: a draft plus its identity."""
+
+    id: str
+    tool_refs: list[str] = Field(
+        default_factory=list,
+        description="Trace step ids this finding rests on.",
+    )
+
+    @classmethod
+    def from_draft(cls, draft: FindingDraft, check: str, tool_refs: Sequence[str]) -> Finding:
+        return cls(
+            **draft.model_dump(),
+            id=stable_id(check, draft.location, draft.title),
+            tool_refs=list(tool_refs),
+        )
+
+    @property
+    def rank(self) -> int:
+        return SEVERITY_RANK[self.severity]
+
+
+class ErrorInfo(BaseModel):
+    """A failure of the SDK, a tool, or the model - never a property of the target.
+
+    A finding says something about the site. An error says the SDK could not
+    find out. They never mix: that is what keeps `passed` honest.
+    """
+
+    kind: ErrorKind
+    message: str
+    tool: str | None = None
+    code: str | None = Field(default=None, description="E_TIMEOUT, E_SERVER_UNAVAILABLE, ...")
+    step_ref: str | None = Field(
+        default=None,
+        description="Trace step this error came from, when it came from one.",
+    )
+
+
+class TraceStep(BaseModel):
+    """One thing that happened, in order. The tool-use log.
+
+    `summary` and `detail` are written by our code. Nothing derived from the
+    target's bytes is ever put here - a trace is read by people and shipped to
+    CI, and a header value echoed into it would carry target content straight
+    past the injection guard.
+    """
+
+    id: str = Field(description="s1, s2, ... monotonic within a run, so tool_refs read plainly.")
+    kind: StepKind
+    name: str = Field(default="", description="Tool name, model id, skill name, or rule name.")
+    status: StepStatus = "ok"
+    summary: str = ""
+    detail: str = ""
+    code: str | None = None
+    duration_ms: int | None = None
+
+    @field_validator("summary", "detail")
+    @classmethod
+    def _cap(cls, value: str) -> str:
+        if len(value) <= MAX_SUMMARY_CHARS:
+            return value
+        return value[: MAX_SUMMARY_CHARS - 1] + "…"
+
+    @property
+    def measured(self) -> bool:
+        """Did this step actually obtain evidence about the target?"""
+        return self.kind == "tool_call" and self.status == "ok"
+
+
+class RunDiff(BaseModel):
+    """What changed since the previous run of this check on this target."""
+
+    previous_run_id: str | None = None
+    new: list[str] = Field(default_factory=list, description="Finding ids seen for the first time.")
+    fixed: list[str] = Field(
+        default_factory=list,
+        description="Gone, and the tool that would have found them ran successfully this time.",
+    )
+    unchanged: list[str] = Field(default_factory=list)
+    unverified: list[str] = Field(
+        default_factory=list,
+        description="Previously found; this run could not re-check them because a tool failed.",
+    )
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.new or self.fixed or self.unverified)
+
+
+# --------------------------------------------------------------------------
+# Status
+# --------------------------------------------------------------------------
+
+
+#: Raised as an error by the runner when the loop ended without measuring.
+NO_TOOL_RAN = ErrorInfo(
+    kind="model",
+    message="The check completed without calling a tool, so nothing about the target was measured.",
+)
+
+
+def decide_status(
+    findings: Sequence[Finding] | Sequence[FindingDraft],
+    errors: Sequence[ErrorInfo],
+    tools_ran: int,
+) -> Status:
+    """The one place a `CheckResult` status is decided.
+
+    | findings | errors | status         |
+    |----------|--------|----------------|
+    | none     | none   | `passed`       |
+    | some     | none   | `issues_found` |
+    | some     | some   | `partial`      |
+    | none     | some   | `failed`       |
+
+    With one rule above the table: **a run that called no tool is never
+    `passed`**. It measured nothing, so an empty findings list is the absence
+    of evidence, not evidence of absence - and a report that calls an
+    unmeasured target clean is the worst output this SDK can produce.
+
+    The same rule disposes of findings produced without a tool: they were
+    remembered, not observed, so the run is `failed` rather than `partial`.
+    """
+    if tools_ran == 0:
+        return "failed"
+    if findings and errors:
+        return "partial"
+    if findings:
+        return "issues_found"
+    if errors:
+        return "failed"
+    return "passed"
+
+
+# --------------------------------------------------------------------------
+# The public result
+# --------------------------------------------------------------------------
+
+
+class CheckResult(BaseModel):
+    """What one check returns. The only thing most developers ever read."""
+
+    check: str
+    target: str
+    status: Status
+    findings: list[Finding] = Field(default_factory=list)
+    errors: list[ErrorInfo] = Field(default_factory=list)
+    diff: RunDiff | None = None
+    trace: list[TraceStep] = Field(default_factory=list)
+
+    run_id: str = ""
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        check: str,
+        target: str,
+        output: CheckOutput,
+        errors: Sequence[ErrorInfo],
+        trace: Sequence[TraceStep],
+        diff: RunDiff | None = None,
+        run_id: str = "",
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+    ) -> CheckResult:
+        """Assemble a result from the model's output and the run's own record.
+
+        The runner calls this instead of constructing a `CheckResult` by hand,
+        so `status` is computed from the trace every time rather than passed
+        in by whoever happens to be assembling the result.
+        """
+        errors = list(errors)
+        trace = list(trace)
+        tool_steps = [step for step in trace if step.measured]
+
+        findings = [
+            Finding.from_draft(draft, check, _refs_for(draft, tool_steps))
+            for draft in output.findings
+        ]
+        findings.sort(key=lambda f: (-f.rank, f.location, f.title))
+
+        if not tool_steps and NO_TOOL_RAN not in errors:
+            errors.append(NO_TOOL_RAN)
+
+        return cls(
+            check=check,
+            target=target,
+            status=decide_status(findings, errors, len(tool_steps)),
+            findings=findings,
+            errors=errors,
+            diff=diff,
+            trace=trace,
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+
+    @property
+    def tools_ran(self) -> int:
+        return sum(1 for step in self.trace if step.measured)
+
+    @property
+    def highest_severity(self) -> Severity | None:
+        return self.findings[0].severity if self.findings else None
+
+    def by_severity(self) -> dict[Severity, list[Finding]]:
+        """Findings grouped for a report, high to low, empty levels omitted."""
+        grouped: dict[Severity, list[Finding]] = {}
+        for finding in self.findings:
+            grouped.setdefault(finding.severity, []).append(finding)
+        return grouped
+
+
+def _refs_for(draft: FindingDraft, tool_steps: Sequence[TraceStep]) -> list[str]:
+    """Trace steps a finding rests on.
+
+    Matched by the tool the model says it quoted. When it named no tool - or
+    named one that never ran - the finding falls back to every tool step of
+    the run: it rests on this run's evidence, just not on an identified part
+    of it. Whether that evidence actually supports the finding is the
+    grounding rule's job, not this function's.
+    """
+    if draft.source_tool:
+        named = [step.id for step in tool_steps if step.name == draft.source_tool]
+        if named:
+            return named
+    return [step.id for step in tool_steps]
