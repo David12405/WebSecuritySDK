@@ -1,4 +1,6 @@
-"""Our reference MCP server - four passive probes.
+"""Standalone Layer 6 security tools exposed through MCP.
 
-INIT: no implementation yet.
+The package intentionally contains only constrained tool implementations and
+the thin MCP transport. Assessment authorization, orchestration and evidence
+persistence belong to the layer above.
 """

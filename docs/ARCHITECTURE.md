@@ -120,11 +120,16 @@ WebSecuritySDK/
 │   ├── results/                 CheckResult, Finding, ErrorInfo (public)
 │   ├── telemetry/               spans + hook events -> result.trace
 │   └── skills/                  SKILL.md folders, one per check
-├── mcp_servers/websec_tools/  L6  our reference server (partner's role)
+├── mcp_servers/websec_tools/  L6  constrained security tool server
 │   ├── server.py                MCP tool definitions
-│   └── probes.py                the passive network probes
+│   ├── probes.py                HTTP, TLS and CORS probes
+│   ├── errors.py                stable tool errors and safe redaction
+│   ├── nmap.py                  host/service discovery
+│   ├── zap.py                   Spider and passive analysis
+│   ├── whatweb.py               technology fingerprinting
+│   └── openapi.py               API specification parsing
 ├── examples/
-│   ├── probe_target.py          investigate any site through MCP, no model
+│   ├── probe_target.py          direct L6 recon verification, no MCP or model
 │   └── run_check.py             full agent run, needs model credentials
 └── tests/
 ```
@@ -199,6 +204,11 @@ An MCP `isError` result whose text begins with a stable code.
 | `E_REDIRECT_LOOP` | more than 5 redirects | no |
 | `E_HTTP` | other transport-level HTTP error | yes |
 | `E_INTERNAL` | bug in the tool | no |
+| `E_INVALID_ARGUMENT` | constrained tool argument is invalid | no |
+| `E_TOOL_UNAVAILABLE` | external executable or daemon is unavailable | yes |
+| `E_TOOL_FAILED` | external tool exited unsuccessfully | yes |
+| `E_PARSE` | deterministic tool output could not be parsed | no |
+| `E_UNSUPPORTED_INPUT` | input format or feature is unsupported | no |
 | `E_SERVER_UNAVAILABLE` | MCP server did not start (raised by the SDK) | yes |
 | `E_TOOL_MISSING` | a check declares a tool no server provides (SDK) | no |
 
@@ -206,10 +216,44 @@ A non-2xx HTTP status is **not** an error — it is data, in `data.status`.
 
 ### 5.4 Behaviour
 
-Every tool is passive and read-only: one ordinary HTTP request, or one TLS
-handshake. No payloads, no fuzzing, no authentication, no writes.
+Baseline probes are passive and read-only: ordinary HTTP requests or a TLS
+handshake. L6 recon extensions are constrained implementations of Nmap,
+traditional ZAP Spider, ZAP Passive Scan, WhatWeb and an OpenAPI parser. They
+do not perform active vulnerability scanning, fuzzing, exploitation or writes.
 
-### 5.5 Result schema
+L6 validates target syntax, tool arguments, subprocess argv, timeouts and
+output limits. Scope authorization, assessment policy, orchestration and
+evidence persistence belong to Layer 5 or a layer above. L6 returns
+tool-specific structured data; the upper layer maps it to evidence and
+observation schemas when needed.
+
+`examples/probe_target.py` is a direct Layer 6 manual-verification utility.
+It calls the Python implementations directly and bypasses the L5
+scope/authorization layer. It is intended only for direct testing against
+targets the operator is authorized to assess. It is not an MCP tool and does
+not add orchestration to `server.py`.
+
+### 5.5 L6 tool catalog
+
+The four baseline tools are frozen in v0.1. The six recon tools are additive
+L6 extensions. Adding or changing a tool name, required argument, output data
+schema or stable error code is a cross-layer contract change and must be
+synchronized with the Layer 5 MCP client.
+
+| Tool | Implementation | Semantic mapping |
+|---|---|---|
+| `get_response_headers` | HTTP | `HTTP_METADATA`, `SECURITY_CONTROL` |
+| `get_cookies` | HTTP | `AUTHENTICATION`, `SECURITY_CONTROL` |
+| `get_tls_info` | TLS | `SECURITY_CONTROL` |
+| `get_cors_policy` | HTTP | `SECURITY_CONTROL` |
+| `discover_hosts` | Nmap host discovery | `NETWORK_HOST` |
+| `discover_services` | Nmap service profiles | `NETWORK_HOST`, `NETWORK_SERVICE` |
+| `crawl_web` | ZAP traditional Spider | `ENDPOINT` |
+| `passive_web_analysis` | ZAP Passive Scan | `SECURITY_SIGNAL` |
+| `fingerprint_web` | WhatWeb | `TECHNOLOGY` |
+| `parse_api_spec` | Internal OpenAPI parser | `ENDPOINT` |
+
+### 5.6 Result schema
 
 ```python
 class Finding(BaseModel):
