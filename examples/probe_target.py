@@ -1,278 +1,376 @@
-"""Investigate any site through the MCP tools - no model, no agent.
+"""Direct Layer 6 recon verification runner.
 
-    python examples/probe_target.py https://example.com
-    python examples/probe_target.py https://example.com --brief
-    python examples/probe_target.py https://example.com --json report.json
-    python examples/probe_target.py https://example.com --scope https://other.test
-    python examples/probe_target.py https://docs.python.org --scope https://python.org --subdomains
+This utility intentionally bypasses MCP, Layer 5 authorization and Agent
+runtime. Use it only against targets the operator is authorized to assess.
 
-Starts `mcp_servers.websec_tools.server` as a real stdio subprocess,
-discovers its tools with `list_tools`, applies the scope guard to each
-proposed call, then calls the ones that survive. That exercises layers 3, 5
-and 6 and the whole tool contract, for the price of a few seconds and no
-model credentials.
+Examples::
 
-Each tool is printed in three stages - what the guard was asked, what it
-decided, and what came back - followed by the findings the one-line summary
-had to leave out. The summary says "1 cookie with weak flags"; the stage
-below it says which cookie and which flag.
-
-What it is for: proving the path works end to end *before* a model is in it.
-When a live check later returns something surprising, this says whether the
-surprise came from the tools or from the agent.
+    python examples/probe_target.py 192.168.56.10
+    python examples/probe_target.py https://example.com --tool get_response_headers
+    python examples/probe_target.py 192.168.56.10 --json recon-report.json
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import sys
-import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
-from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from websecuritycheck.policy.errors import code_of, is_retryable, message_of
-from websecuritycheck.policy.scope_guard import guard_tool_call, normalize_scope
+from mcp_servers.websec_tools import nmap, openapi, probes, whatweb, zap  # noqa: E402
+from mcp_servers.websec_tools.errors import ToolError, safe_message  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-SERVER = StdioServerParameters(
-    command=sys.executable,
-    args=["-m", "mcp_servers.websec_tools.server"],
-    cwd=str(REPO_ROOT),
+TOOL_ORDER = (
+    "discover_hosts",
+    "discover_services",
+    "get_response_headers",
+    "get_cookies",
+    "get_tls_info",
+    "get_cors_policy",
+    "fingerprint_web",
+    "crawl_web",
+    "passive_web_analysis",
+    "parse_api_spec",
 )
+OPENAPI_CANDIDATE_PATHS = (
+    "/openapi.json",
+    "/openapi.yaml",
+    "/swagger.json",
+    "/swagger.yaml",
+    "/v3/api-docs",
+)
+MAX_WEB_TARGETS = 10
+
+ToolCall = Callable[[str], Awaitable[dict[str, Any]]]
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("target", help="the http(s) URL to probe")
-    parser.add_argument(
-        "--scope",
-        action="append",
-        help="scope entry; repeatable. Defaults to the target itself.",
-    )
-    parser.add_argument("--subdomains", action="store_true", help="allow subdomains of the scope")
-    parser.add_argument("--json", dest="json_path", help="write the raw envelopes to this file")
-    parser.add_argument("--timeout", type=float, default=30.0, help="per-tool timeout in seconds")
-    parser.add_argument("--brief", action="store_true", help="one line per tool, no findings")
-    return parser.parse_args()
+def _is_url(value: str) -> bool:
+    parsed = urlsplit(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
 
-# --------------------------------------------------------------------------
-# What each envelope actually says
-# --------------------------------------------------------------------------
-#
-# The summary is one line by contract, so it has to leave things out - "1
-# cookie with weak flags" without saying which cookie or which flag. These
-# read the `data` half and show the part a person would ask about next.
-#
-# Keyed by tool name, with a generic fallback: this script discovers whatever
-# tools a server exposes, so it must stay useful against a server it has
-# never seen.
-
-
-def detail_headers(data: dict[str, Any]) -> list[str]:
-    lines = [f"final url    {data.get('final_url')}  (status {data.get('status')})"]
-    if chain := data.get("redirect_chain"):
-        lines.append(f"redirects    {' -> '.join(chain)}")
-    present = data.get("security_headers_present") or {}
-    for name, value in present.items():
-        lines.append(f"present      {name}: {value[:70]}")
-    for name in data.get("security_headers_missing") or []:
-        lines.append(f"MISSING      {name}")
-    for name, value in (data.get("information_disclosure") or {}).items():
-        lines.append(f"discloses    {name}: {value[:70]}")
-    return lines
-
-
-def detail_cookies(data: dict[str, Any]) -> list[str]:
-    weak = data.get("weak_cookies") or {}
-    lines = []
-    for cookie in data.get("cookies") or []:
-        flags = [flag for flag in ("secure", "httponly") if cookie.get(flag)]
-        if cookie.get("samesite"):
-            flags.append(f"samesite={cookie['samesite']}")
-        name = cookie["name"]
-        mark = "WEAK " if name in weak else "ok   "
-        lines.append(f"{mark}        {name}  ({cookie['value_length']} chars) {', '.join(flags)}")
-        for reason in weak.get(name, []):
-            lines.append(f"               - {reason}")
-    return lines
-
-
-def detail_tls(data: dict[str, Any]) -> list[str]:
-    trusted = "trusted" if data.get("chain_trusted") else f"NOT trusted: {data.get('chain_error')}"
-    lines = [
-        f"protocol     {data.get('protocol')}  {data.get('cipher')}",
-        f"chain        {trusted}",
-        f"issuer       {data.get('issuer')}",
-        f"subject      {data.get('subject')}",
-        f"valid until  {data.get('not_after')}  ({data.get('expires_in_days')} days)",
-    ]
-    sans = data.get("sans") or []
-    if sans:
-        shown = ", ".join(sans[:5])
-        more = f" (+{data['san_count'] - 5} more)" if data.get("san_count", 0) > 5 else ""
-        lines.append(f"sans         {shown}{more}")
-    return lines
-
-
-def detail_cors(data: dict[str, Any]) -> list[str]:
-    lines = [
-        f"allow-origin {data.get('allow_origin')!r}",
-        f"credentials  {data.get('allow_credentials')}",
-        f"vary origin  {data.get('vary_includes_origin')}",
-    ]
-    if data.get("credentialed_wildcard"):
-        lines.append("WEAK         wildcard origin with credentials; browsers refuse this")
-    if data.get("reflects_arbitrary_origin"):
-        lines.append(f"WEAK         reflects any origin ({data.get('probe_origin')} was echoed)")
-    if methods := data.get("preflight_allow_methods"):
-        lines.append(f"preflight    methods {methods}")
-    return lines
-
-
-DETAIL = {
-    "get_response_headers": detail_headers,
-    "get_cookies": detail_cookies,
-    "get_tls_info": detail_tls,
-    "get_cors_policy": detail_cors,
-}
-
-
-def detail_generic(data: dict[str, Any]) -> list[str]:
-    """For a tool this script has never seen - a partner's, or a new one of ours."""
-    lines = []
-    for key, value in data.items():
-        rendered = json.dumps(value) if not isinstance(value, str) else value
-        lines.append(f"{key[:12]:12} {rendered[:80]}")
-    return lines
-
-
-def text_of(result: Any) -> str:
-    parts = []
-    for block in getattr(result, "content", []) or []:
-        text = getattr(block, "text", None)
-        if text:
-            parts.append(text)
-    return "\n".join(parts)
-
-
-def payload_of(result: Any) -> Any:
-    """The envelope, however this SDK version chose to carry it."""
-    structured = getattr(result, "structured_content", None) or getattr(
-        result, "structuredContent", None
-    )
-    if structured:
-        return structured
+def _classify_target(target: str) -> str:
+    if not isinstance(target, str) or not target.strip():
+        raise ValueError("target is empty")
+    if "://" in target:
+        try:
+            probes._validate_target(target)
+        except ToolError as exc:
+            raise ValueError(exc.message) from exc
+        return "url"
     try:
-        return json.loads(text_of(result))
-    except (ValueError, TypeError):
-        return {"summary": text_of(result)}
+        nmap._validate_target(target)
+    except ToolError as exc:
+        raise ValueError(exc.message) from exc
+    return "network"
 
 
-def say(args: argparse.Namespace, stage: str, line: str) -> None:
-    """One stage line, unless `--brief` asked for the summary only."""
-    if not args.brief:
-        print(f"  {stage:7} {line}")
-
-
-async def run(args: argparse.Namespace) -> int:
-    scope = normalize_scope(args.scope or [args.target])
-    print(f"target  {args.target}")
-    print(f"scope   {args.scope or [args.target]}" + ("  (+subdomains)" if args.subdomains else ""))
-
-    report: dict[str, Any] = {"target": args.target, "tools": {}}
-    blocked = 0
-    failed = 0
-
-    async with (
-        stdio_client(SERVER) as (read, write),
-        ClientSession(read, write) as session,
+def _canonical_url(target: str) -> str:
+    probes._validate_target(target)
+    parsed = urlsplit(target)
+    hostname = parsed.hostname or ""
+    try:
+        hostname = hostname.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ToolError("E_INVALID_TARGET", "target hostname is invalid") from exc
+    port = parsed.port
+    if ":" in hostname:
+        host = f"[{hostname}]"
+    else:
+        host = hostname
+    if port is not None and not (
+        (parsed.scheme == "http" and port == 80)
+        or (parsed.scheme == "https" and port == 443)
     ):
-        await session.initialize()
-        tools = (await session.list_tools()).tools
-        names = ", ".join(tool.name for tool in tools)
-        print(f"\nMCP server exposes {len(tools)} tool(s): {names}\n")
+        host = f"{host}:{port}"
+    return urlunsplit((parsed.scheme.lower(), host, parsed.path or "/", parsed.query, ""))
 
-        for tool in tools:
-            tool_input: dict[str, Any] = {"target": args.target}
-            if not args.brief:
-                print(f"\n{'-' * 78}\n{tool.name}\n{'-' * 78}")
 
-            # ---- before the call: the same policy the agent runs under ----
-            decision = guard_tool_call(
-                tool.name,
-                tool_input,
-                allowlist=[t.name for t in tools],
-                scope=scope,
-                allow_subdomains=args.subdomains,
-            )
-            say(args, "BEFORE", f"scope guard: {json.dumps(tool_input)}")
-            if not decision:
-                blocked += 1
-                verdict = f"BLOCKED  {decision.reason}"
-                print(f"{tool.name:22} {verdict}" if args.brief else f"  {verdict}")
-                report["tools"][tool.name] = {"blocked": decision.reason}
+def _network_target(target: str) -> str:
+    if _is_url(target):
+        return urlsplit(target).hostname or target
+    return target
+
+
+def _build_url(address: str, scheme: str, port: int | None) -> str:
+    host = address
+    try:
+        if ipaddress.ip_address(address).version == 6:
+            host = f"[{address}]"
+    except ValueError:
+        host = address.encode("idna").decode("ascii").lower()
+    if port is not None and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    ):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}/"
+
+
+def _service_scheme(service: Mapping[str, Any]) -> str | None:
+    try:
+        port = int(service.get("port"))
+    except (TypeError, ValueError):
+        return None
+    name = str(service.get("service") or "").lower()
+    tunnel = str(service.get("tunnel") or "").lower()
+    if (
+        name == "https"
+        or ("ssl" in name and "http" in name)
+        or tunnel in {"ssl", "tls"}
+        or port in {443, 8443, 9443}
+    ):
+        return "https"
+    if "http" in name or port in {80, 8000, 8080, 8888}:
+        return "http"
+    return None
+
+
+def _derive_web_targets(service_result: Mapping[str, Any]) -> list[str]:
+    candidates: set[str] = set()
+    data = service_result.get("data")
+    if not isinstance(data, Mapping):
+        return []
+    for host in data.get("hosts", []):
+        if not isinstance(host, Mapping):
+            continue
+        address = host.get("address")
+        if not isinstance(address, str):
+            continue
+        for service in host.get("services", []):
+            if not isinstance(service, Mapping):
                 continue
-            say(args, "", "allowed, calling the tool")
-
-            # ---- the call -------------------------------------------------
-            started = time.perf_counter()
-            try:
-                result = await asyncio.wait_for(
-                    session.call_tool(tool.name, tool_input), timeout=args.timeout
-                )
-            except TimeoutError:
-                failed += 1
-                report["tools"][tool.name] = {"error": "no answer", "code": "E_TIMEOUT"}
-                line = f"E_TIMEOUT    no answer in {args.timeout}s"
-                print(f"{tool.name:22} {line}" if args.brief else f"  AFTER   {line}")
+            scheme = _service_scheme(service)
+            if scheme is None:
                 continue
-            elapsed = int((time.perf_counter() - started) * 1000)
+            port = service.get("port")
+            port = port if isinstance(port, int) else None
+            candidates.add(_build_url(address, scheme, port))
+    return sorted(candidates)[:MAX_WEB_TARGETS]
 
-            # ---- after the call -------------------------------------------
-            if getattr(result, "is_error", False) or getattr(result, "isError", False):
-                failed += 1
-                raw = text_of(result)
-                code = code_of(raw)
-                retry = "retryable" if is_retryable(code) else "terminal"
-                line = f"{code:12} {message_of(raw)}   ({retry}, {elapsed} ms)"
-                print(f"{tool.name:22} {line}" if args.brief else f"  AFTER   {line}")
-                report["tools"][tool.name] = {"error": message_of(raw), "code": code}
+
+def _limit_web_targets(targets: Sequence[str], pinned: str | None = None) -> list[str]:
+    unique = set(targets)
+    if pinned is not None:
+        unique.add(pinned)
+    if pinned is not None:
+        remaining = sorted(unique - {pinned})[: MAX_WEB_TARGETS - 1]
+        return sorted([pinned, *remaining])
+    return sorted(unique)[:MAX_WEB_TARGETS]
+
+
+def _looks_like_openapi_url(target: str) -> bool:
+    path = urlsplit(target).path.lower()
+    return "openapi" in path or "swagger" in path or path.rstrip("/") == "/v3/api-docs"
+
+
+def _origin_url(target: str) -> str:
+    parsed = urlsplit(target)
+    return urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+
+
+def _openapi_candidates(web_targets: Sequence[str], input_url: str | None) -> list[str]:
+    candidates: list[str] = []
+    if input_url and _looks_like_openapi_url(input_url):
+        candidates.append(input_url)
+    for target in web_targets:
+        origin = _origin_url(target)
+        for suffix in OPENAPI_CANDIDATE_PATHS:
+            candidates.append(origin.rstrip("/") + suffix)
+    return list(dict.fromkeys(candidates))
+
+
+def _empty_tool_result(status: str, reason: str | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {"status": status, "invocations": []}
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def _aggregate(
+    invocations: list[dict[str, Any]], skipped_reason: str | None = None
+) -> dict[str, Any]:
+    if any(item["status"] == "error" for item in invocations):
+        status = "error"
+    elif any(item["status"] == "success" for item in invocations):
+        status = "success"
+    else:
+        status = "skipped"
+    output: dict[str, Any] = {"status": status, "invocations": invocations}
+    if status == "skipped" and skipped_reason:
+        output["reason"] = skipped_reason
+    return output
+
+
+async def _call_one(
+    target: str,
+    tool: ToolCall,
+) -> dict[str, Any]:
+    try:
+        result = await tool(target)
+        if not isinstance(result, dict) or set(result) != {"summary", "data", "truncated"}:
+            raise ToolError("E_INTERNAL", "tool returned an invalid envelope")
+        return {"target": target, "status": "success", "result": result}
+    except ToolError as exc:
+        return {
+            "target": target,
+            "status": "error",
+            "error": {"code": exc.code, "message": safe_message(exc, "tool failed")},
+        }
+    except Exception:
+        return {
+            "target": target,
+            "status": "error",
+            "error": {"code": "E_INTERNAL", "message": "tool failed"},
+        }
+
+
+def _tool_calls() -> dict[str, ToolCall]:
+    return {
+        "discover_hosts": nmap.discover_hosts,
+        "discover_services": nmap.discover_services,
+        "get_response_headers": probes.get_response_headers,
+        "get_cookies": probes.get_cookies,
+        "get_tls_info": probes.get_tls_info,
+        "get_cors_policy": probes.get_cors_policy,
+        "fingerprint_web": whatweb.fingerprint_web,
+        "crawl_web": zap.crawl_web,
+        "passive_web_analysis": zap.passive_web_analysis,
+        "parse_api_spec": openapi.parse_api_spec,
+    }
+
+
+async def _run_explicit(target: str, selected: Sequence[str]) -> tuple[dict[str, Any], int]:
+    calls = _tool_calls()
+    results: dict[str, Any] = {}
+    for name in TOOL_ORDER:
+        if name not in selected:
+            continue
+        invocation = await _call_one(target, calls[name])
+        results[name] = _aggregate([invocation])
+    report = {
+        "target": target,
+        "web_targets": [_canonical_url(target)] if _is_url(target) else [],
+        "results": results,
+    }
+    return report, 1 if any(item["status"] != "success" for item in results.values()) else 0
+
+
+async def _run_openapi_candidates(
+    candidates: Sequence[str],
+    calls: Mapping[str, ToolCall],
+) -> dict[str, Any]:
+    non_match_codes = {"E_HTTP", "E_PARSE", "E_UNSUPPORTED_INPUT"}
+    for candidate in candidates:
+        invocation = await _call_one(candidate, calls["parse_api_spec"])
+        if invocation["status"] == "success":
+            return _aggregate([invocation])
+        error = invocation.get("error", {})
+        if error.get("code") not in non_match_codes:
+            return _aggregate([invocation])
+    return _empty_tool_result("skipped", "no OpenAPI specification discovered")
+
+
+async def _run_all(target: str) -> tuple[dict[str, Any], int]:
+    kind = _classify_target(target)
+    input_url = _canonical_url(target) if kind == "url" else None
+    network_target = _network_target(target)
+    calls = _tool_calls()
+    results: dict[str, Any] = {}
+    host_invocation = await _call_one(network_target, calls["discover_hosts"])
+    service_invocation = await _call_one(
+        network_target, calls["discover_services"]
+    )
+    results["discover_hosts"] = _aggregate([host_invocation])
+    results["discover_services"] = _aggregate([service_invocation])
+
+    web_targets: list[str] = []
+    if input_url:
+        web_targets.append(input_url)
+    if service_invocation["status"] == "success":
+        derived = _derive_web_targets(service_invocation["result"])
+        web_targets = _limit_web_targets([*web_targets, *derived], pinned=input_url)
+    else:
+        web_targets = _limit_web_targets(web_targets, pinned=input_url)
+
+    for name in (
+        "get_response_headers",
+        "get_cookies",
+        "get_tls_info",
+        "get_cors_policy",
+        "fingerprint_web",
+        "crawl_web",
+        "passive_web_analysis",
+    ):
+        invocations: list[dict[str, Any]] = []
+        for web_target in web_targets:
+            if name == "get_tls_info" and not web_target.lower().startswith("https://"):
                 continue
+            invocations.append(await _call_one(web_target, calls[name]))
+        results[name] = _aggregate(invocations, "no applicable web target discovered")
 
-            envelope = payload_of(result)
-            summary = envelope.get("summary", "<no summary>")
-            cut = "  [truncated]" if envelope.get("truncated") else ""
-            report["tools"][tool.name] = envelope
-
-            if args.brief:
-                print(f"{tool.name:22} {summary}{cut}   ({elapsed} ms)")
-                continue
-
-            say(args, "AFTER", f"{summary}{cut}   ({elapsed} ms)")
-            data = envelope.get("data") or {}
-            render = DETAIL.get(tool.name, detail_generic)
-            for line in render(data):
-                print(f"            {line}")
-
-    answered = len(report["tools"]) - blocked - failed
-    print(f"\n{answered} tool(s) answered, {blocked} blocked, {failed} failed")
-
-    if args.json_path:
-        Path(args.json_path).write_text(json.dumps(report, indent=2), encoding="utf-8")
-        print(f"raw envelopes written to {args.json_path}")
-    return 1 if failed else 0
+    results["parse_api_spec"] = await _run_openapi_candidates(
+        _openapi_candidates(web_targets, input_url), calls
+    )
+    report = {"target": target, "web_targets": web_targets, "results": results}
+    failed = any(item["status"] == "error" for item in results.values())
+    return report, 1 if failed else 0
 
 
-def main() -> int:
-    return asyncio.run(run(parse_args()))
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run direct Layer 6 recon verification")
+    parser.add_argument("target", help="absolute HTTP(S) URL, hostname, IP or CIDR")
+    parser.add_argument("--tool", action="append", choices=(*TOOL_ORDER, "all"))
+    parser.add_argument("--json", dest="json_path", type=Path)
+    return parser
+
+
+async def run_recon(
+    target: str, selected: Sequence[str] | None = None
+) -> tuple[dict[str, Any], int]:
+    selected = tuple(selected or ("all",))
+    if selected == ("all",):
+        return await _run_all(target)
+    if "all" in selected:
+        raise ValueError("--tool all cannot be combined with other tools")
+    _classify_target(target)
+    return await _run_explicit(target, selected)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(argv)
+    selected = tuple(args.tool or ("all",))
+    try:
+        report, exit_code = asyncio.run(run_recon(args.target, selected))
+    except ValueError as exc:
+        parser.error(str(exc))
+    except ToolError as exc:
+        report = {
+            "target": args.target,
+            "web_targets": [],
+            "results": {
+                "runner": {
+                    "status": "error",
+                    "error": {"code": exc.code, "message": safe_message(exc, "runner failed")},
+                }
+            },
+        }
+        exit_code = 1
+    payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    print(payload, end="")
+    if args.json_path is not None:
+        args.json_path.write_text(payload, encoding="utf-8", newline="\n")
+    return exit_code
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

@@ -1,393 +1,456 @@
-"""The actual network probes, with no MCP in them.
-
-Every probe is passive and read-only: one ordinary HTTP request, or one TLS
-handshake. No payloads, no fuzzing, no authentication, no writes. A probe
-that needed to be more active would be a separate contract discussion.
-
-Two halves, deliberately separated:
-
-    analyse_*   pure. Given headers or a certificate, what is wrong with it?
-    probe_*     one network call, then `analyse_*`, then the envelope.
-
-The analysis is where the security knowledge lives, and it is the half worth
-testing - so it takes plain dicts and never touches a socket. The tests run
-with no network at all.
-
-Every probe returns the contract envelope:
-
-    {"summary": "one line", "data": {...}, "truncated": false}
-
-and raises `ProbeError` with a stable `E_*` code on failure. A non-2xx HTTP
-status is **not** a failure - it is data, in `data["status"]`.
-"""
+"""Passive, MCP-independent network probes for the Layer 6 server."""
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import math
+import re
 import socket
 import ssl
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+from http.cookies import SimpleCookie
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from pydantic import BaseModel, ConfigDict, Field
 
-# --------------------------------------------------------------------------
-# Declared size caps (the contract requires a server to declare them)
-# --------------------------------------------------------------------------
+from .errors import ToolError, envelope, safe_message
 
+TIMEOUT_SECONDS = 10.0
+MAX_REDIRECTS = 5
 MAX_HEADERS = 60
 MAX_COOKIES = 40
-MAX_VALUE_CHARS = 2048
+MAX_VALUE_LENGTH = 2048
 MAX_SANS = 20
-MAX_REDIRECTS = 5
-
-DEFAULT_TIMEOUT_S = 10.0
-
-#: The headers a check asks about. Order matters: it is the order they are
-#: reported in, and a report that leads with a legacy header reads badly.
+TEST_ORIGIN = "https://websecuritycheck.invalid"
 SECURITY_HEADERS = (
     "strict-transport-security",
     "content-security-policy",
     "x-frame-options",
     "x-content-type-options",
-    "referrer-policy",
-    "permissions-policy",
-    "cross-origin-opener-policy",
-    "cross-origin-resource-policy",
+)
+SENSITIVE_HEADERS = frozenset(
+    {"set-cookie", "authorization", "proxy-authorization", "x-api-key"}
+)
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
 )
 
-#: Present these say something about the stack behind the site. Not a
-#: vulnerability on their own, which is why they are reported separately.
-DISCLOSURE_HEADERS = (
-    "server",
-    "x-powered-by",
-    "x-aspnet-version",
-    "x-aspnetmvc-version",
-    "x-generator",
-    "via",
-)
 
-#: An origin no target should ever be configured to trust. If it comes back
-#: in Access-Control-Allow-Origin, the target reflects whatever it is sent.
-PROBE_ORIGIN = "https://websecuritycheck-probe.invalid"
+class RedirectHop(BaseModel):
+    from_url: str = Field(alias="from")
+    to_url: str = Field(alias="to")
+    status: int
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-class ProbeError(Exception):
-    """A failure to complete the probe. Carries a stable code from the contract."""
+class ResponseHeadersResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-
-
-@dataclass(frozen=True)
-class Envelope:
-    summary: str
-    data: dict[str, Any]
-    truncated: bool = False
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary, "data": self.data, "truncated": self.truncated}
+    final_url: str
+    status: int
+    http_version: str
+    redirects: list[RedirectHop]
+    headers: dict[str, str]
+    redacted_headers: list[str]
+    security_headers_present: list[str]
+    security_headers_missing: list[str]
 
 
-# --------------------------------------------------------------------------
-# Pure analysis
-# --------------------------------------------------------------------------
+class CookieMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    value_length: int = Field(ge=0)
+    secure: bool
+    httponly: bool
+    samesite: str | None = None
+    domain: str | None = None
+    path: str | None = None
+    expires: str | None = None
 
 
-def analyse_headers(headers: dict[str, str]) -> dict[str, Any]:
-    """Which security headers are present, which are missing, what leaks."""
-    lower = {name.lower(): value for name, value in headers.items()}
-    present = {name: lower[name] for name in SECURITY_HEADERS if name in lower}
-    return {
-        "security_headers_present": present,
-        "security_headers_missing": [name for name in SECURITY_HEADERS if name not in lower],
-        "information_disclosure": {
-            name: lower[name] for name in DISCLOSURE_HEADERS if name in lower
-        },
-    }
+class CookieResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    final_url: str
+    status: int
+    redirects: list[RedirectHop]
+    cookies: list[CookieMetadata]
 
 
-def parse_set_cookie(raw: str) -> dict[str, Any]:
-    """One `Set-Cookie` header line, as attributes.
+class TLSInfoResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    **The value is never returned, only its length.** A cookie value is a
-    live session credential; it has no place in a finding, a log or a store,
-    and a probe that returns one has handed the model something it can quote
-    into a report by accident.
-    """
-    first, _, rest = raw.partition(";")
-    name, _, value = first.partition("=")
-    cookie: dict[str, Any] = {
-        "name": name.strip(),
-        "value_length": len(value.strip()),
-        "secure": False,
-        "httponly": False,
-        "samesite": None,
-        "domain": None,
-        "path": None,
-        "expires": None,
-        "max_age": None,
-    }
-    for part in rest.split(";"):
-        key, _, val = part.strip().partition("=")
-        key = key.lower()
-        val = val.strip()[:MAX_VALUE_CHARS]
-        if key == "secure":
-            cookie["secure"] = True
-        elif key == "httponly":
-            cookie["httponly"] = True
-        elif key in {"samesite", "domain", "path", "expires"}:
-            cookie[key] = val
-        elif key == "max-age":
-            cookie["max_age"] = val
-    return cookie
+    hostname: str
+    port: int = Field(ge=1, le=65535)
+    protocol: str | None = None
+    cipher: str | None = None
+    chain_valid: bool
+    issuer: str
+    subject: str
+    not_before: datetime
+    not_after: datetime
+    days_to_expiry: int
+    sans: list[str]
 
 
-def analyse_cookies(cookies: list[dict[str, Any]], *, https: bool) -> dict[str, Any]:
-    """Which cookies have weak flags, and why each one is weak."""
-    weak: dict[str, list[str]] = {}
-    for cookie in cookies:
-        reasons = []
-        if https and not cookie["secure"]:
-            reasons.append("no Secure flag on an https response")
-        if not cookie["httponly"]:
-            reasons.append("no HttpOnly flag, so script can read it")
-        if not cookie["samesite"]:
-            reasons.append("no SameSite attribute")
-        elif cookie["samesite"].lower() == "none" and not cookie["secure"]:
-            reasons.append("SameSite=None without Secure, which browsers reject")
-        if reasons:
-            weak[cookie["name"]] = reasons
-    return {"cookies": cookies, "weak_cookies": weak}
+class CORSExchange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: int
+    headers: dict[str, str]
+    redirects: list[RedirectHop]
 
 
-def analyse_certificate(der: bytes, *, now: datetime | None = None) -> dict[str, Any]:
-    """Issuer, subject, validity window and SANs, from the DER bytes."""
-    now = now or datetime.now(UTC)
-    cert = x509.load_der_x509_certificate(der)
-    not_before, not_after = cert.not_valid_before_utc, cert.not_valid_after_utc
+class CORSPolicyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    origin_tested: str
+    simple: CORSExchange
+    preflight: CORSExchange
+    allow_origin: str | None = None
+    allow_credentials: bool
+    origin_reflected: bool
+    wildcard_origin: bool
+    vary_includes_origin: bool
+
+
+ProbeError = ToolError
+
+
+def _validate_target(target: str) -> None:
     try:
-        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
-        names = [str(name.value) for name in san.value]
-    except x509.ExtensionNotFound:
-        names = []
-    return {
-        "subject": cert.subject.rfc4514_string()[:MAX_VALUE_CHARS],
-        "issuer": cert.issuer.rfc4514_string()[:MAX_VALUE_CHARS],
-        "not_before": not_before.isoformat(),
-        "not_after": not_after.isoformat(),
-        "expires_in_days": (not_after - now).days,
-        "expired": not_after < now,
-        "not_yet_valid": not_before > now,
-        "sans": names[:MAX_SANS],
-        "san_count": len(names),
-        "fingerprint_sha256": cert.fingerprint(hashes.SHA256()).hex(),
-    }
-
-
-def analyse_cors(simple: dict[str, str], preflight: dict[str, str]) -> dict[str, Any]:
-    """What the target is willing to share cross-origin, and with whom."""
-    merged = {k.lower(): v for k, v in simple.items()}
-    allow_origin = merged.get("access-control-allow-origin")
-    allow_credentials = merged.get("access-control-allow-credentials", "").lower() == "true"
-    vary = merged.get("vary", "").lower()
-    pre = {k.lower(): v for k, v in preflight.items()}
-    return {
-        "allow_origin": allow_origin,
-        "allow_credentials": allow_credentials,
-        "wildcard": allow_origin == "*",
-        "reflects_arbitrary_origin": allow_origin == PROBE_ORIGIN,
-        "vary_includes_origin": "origin" in vary,
-        "preflight_allow_methods": pre.get("access-control-allow-methods"),
-        "preflight_allow_headers": pre.get("access-control-allow-headers"),
-        "preflight_max_age": pre.get("access-control-max-age"),
-        # The combination browsers refuse, and the one that turns a readable
-        # response into a readable *authenticated* response.
-        "credentialed_wildcard": allow_origin == "*" and allow_credentials,
-    }
-
-
-# --------------------------------------------------------------------------
-# Network
-# --------------------------------------------------------------------------
-
-
-def _require_url(target: str, *, https_only: bool = False) -> tuple[str, int]:
-    parts = urlsplit(target.strip())
-    if parts.scheme not in {"http", "https"}:
-        raise ProbeError("E_INVALID_TARGET", f"{target!r} is not an http or https URL")
-    if https_only and parts.scheme != "https":
-        raise ProbeError("E_INVALID_TARGET", "a TLS probe needs an https URL")
+        parsed = urlsplit(target)
+        hostname = parsed.hostname
+        parsed.port
+    except (TypeError, ValueError):
+        raise ProbeError("E_INVALID_TARGET", "target is not a valid URL") from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or parsed.username
+        or parsed.password
+        or any(char.isspace() or ord(char) < 32 for char in target)
+    ):
+        raise ProbeError("E_INVALID_TARGET", "target must be an absolute HTTP(S) URL")
     try:
-        hostname, port = parts.hostname, parts.port
-    except ValueError as exc:
-        raise ProbeError("E_INVALID_TARGET", f"{target!r} has an invalid port") from exc
-    if not hostname:
-        raise ProbeError("E_INVALID_TARGET", f"{target!r} has no host")
-    return hostname, port or (443 if parts.scheme == "https" else 80)
+        ascii_hostname = hostname.encode("idna").decode("ascii").rstrip(".")
+    except UnicodeError:
+        raise ProbeError("E_INVALID_TARGET", "target hostname is invalid") from None
+    try:
+        ipaddress.ip_address(ascii_hostname)
+    except ValueError:
+        if not _HOSTNAME_RE.fullmatch(ascii_hostname):
+            raise ProbeError("E_INVALID_TARGET", "target hostname is invalid")
 
 
-def _fetch(
+def _cap(value: str | None) -> tuple[str, bool]:
+    value = value or ""
+    if len(value) <= MAX_VALUE_LENGTH:
+        return value, False
+    return value[:MAX_VALUE_LENGTH], True
+
+
+def _header_map(response: httpx.Response) -> tuple[dict[str, str], bool]:
+    output: dict[str, str] = {}
+    truncated = len(response.headers) > MAX_HEADERS
+    items = list(response.headers.items())
+    security_names = {name for name, _value in items if name.lower() in SECURITY_HEADERS}
+    prioritized = [item for item in items if item[0].lower() in security_names]
+    prioritized.extend(item for item in items if item[0].lower() not in security_names)
+    for name, value in prioritized[:MAX_HEADERS]:
+        normalized = name.lower()
+        if normalized in SENSITIVE_HEADERS:
+            output[normalized] = "<redacted>"
+            continue
+        capped, was_truncated = _cap(value)
+        output[normalized] = capped
+        truncated = truncated or was_truncated
+    return output, truncated
+
+
+async def _fetch(
+    client: httpx.AsyncClient,
     target: str,
-    *,
     method: str = "GET",
     headers: dict[str, str] | None = None,
-    timeout: float = DEFAULT_TIMEOUT_S,
-) -> httpx.Response:
-    """One ordinary request. Every failure becomes a contract error code."""
-    _require_url(target)
-    try:
-        with httpx.Client(
-            follow_redirects=True,
-            max_redirects=MAX_REDIRECTS,
-            timeout=timeout,
-            headers={"user-agent": "WebSecurityCheck/0.1 (passive probe)"},
-        ) as client:
-            return client.request(method, target, headers=headers or {})
-    except httpx.TooManyRedirects as exc:
-        raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects") from exc
-    except httpx.TimeoutException as exc:
-        raise ProbeError("E_TIMEOUT", f"timed out after {timeout}s") from exc
-    except httpx.ConnectError as exc:
-        raise ProbeError("E_CONNECT", str(exc) or "could not connect") from exc
-    except httpx.HTTPError as exc:
-        raise ProbeError("E_HTTP", str(exc) or exc.__class__.__name__) from exc
-
-
-def probe_response_headers(target: str, timeout: float = DEFAULT_TIMEOUT_S) -> Envelope:
-    response = _fetch(target, timeout=timeout)
-    headers = dict(response.headers)
-    truncated = len(headers) > MAX_HEADERS
-    if truncated:
-        headers = dict(list(headers.items())[:MAX_HEADERS])
-    headers = {k: v[:MAX_VALUE_CHARS] for k, v in headers.items()}
-
-    analysis = analyse_headers(headers)
-    chain = [str(r.url) for r in response.history][:MAX_REDIRECTS]
-    missing = len(analysis["security_headers_missing"])
-    return Envelope(
-        summary=(
-            f"{response.status_code} {response.http_version} on {response.url} - "
-            f"{len(headers)} headers, {missing} security headers missing"
-        ),
-        data={
-            "final_url": str(response.url),
-            "status": response.status_code,
-            "http_version": response.http_version,
-            "redirect_chain": chain,
-            "headers": headers,
-            **analysis,
-        },
-        truncated=truncated,
-    )
-
-
-def probe_cookies(target: str, timeout: float = DEFAULT_TIMEOUT_S) -> Envelope:
-    response = _fetch(target, timeout=timeout)
-    raw = response.headers.get_list("set-cookie")
-    truncated = len(raw) > MAX_COOKIES
-    cookies = [parse_set_cookie(line) for line in raw[:MAX_COOKIES]]
-    analysis = analyse_cookies(cookies, https=str(response.url).startswith("https://"))
-    weak = len(analysis["weak_cookies"])
-    return Envelope(
-        summary=f"{len(cookies)} cookie(s) set; {weak} with weak flags",
-        data={"final_url": str(response.url), **analysis},
-        truncated=truncated,
-    )
-
-
-def probe_tls(target: str, timeout: float = DEFAULT_TIMEOUT_S) -> Envelope:
-    """One TLS handshake.
-
-    The verified handshake decides whether the chain is trusted. If it
-    fails, a second unverified handshake still reports *which* certificate
-    was presented - a report that says only "verification failed" sends the
-    reader to look at a certificate it cannot see.
-    """
-    host, port = _require_url(target, https_only=True)
-    verify_error: str | None = None
-    try:
-        der, protocol, cipher = _handshake(host, port, timeout, verify=True)
-    except ssl.SSLCertVerificationError as exc:
-        verify_error = exc.verify_message or str(exc)
+) -> tuple[httpx.Response, list[dict[str, Any]]]:
+    _validate_target(target)
+    current = target
+    chain: list[dict[str, Any]] = []
+    for _ in range(MAX_REDIRECTS + 1):
         try:
-            der, protocol, cipher = _handshake(host, port, timeout, verify=False)
-        except OSError as inner:
-            raise ProbeError("E_TLS", str(inner)) from inner
-    except ssl.SSLError as exc:
-        raise ProbeError("E_TLS", str(exc)) from exc
-    except TimeoutError as exc:
-        raise ProbeError("E_TIMEOUT", f"handshake timed out after {timeout}s") from exc
-    except OSError as exc:
-        raise ProbeError("E_CONNECT", str(exc)) from exc
+            response = await client.request(
+                method, current, headers=headers or {}, follow_redirects=False
+            )
+        except httpx.TimeoutException as exc:
+            raise ProbeError(
+                "E_TIMEOUT", f"request timed out after {TIMEOUT_SECONDS:.1f}s"
+            ) from exc
+        except httpx.InvalidURL as exc:
+            raise ProbeError("E_INVALID_TARGET", "target URL is invalid") from exc
+        except httpx.ConnectError as exc:
+            raise ProbeError("E_CONNECT", "connection failed") from exc
+        except httpx.HTTPError as exc:
+            raise ProbeError("E_HTTP", "HTTP transport failed") from exc
 
-    cert = analyse_certificate(der)
-    valid = verify_error is None
-    status = "certificate valid" if valid else f"chain NOT trusted ({verify_error})"
-    return Envelope(
-        summary=(f"{protocol} ({cipher}); {status}, {cert['expires_in_days']} days left"),
-        data={
-            "host": host,
-            "port": port,
-            "protocol": protocol,
-            "cipher": cipher,
-            "chain_trusted": valid,
-            "chain_error": verify_error,
-            **cert,
-        },
-        truncated=cert["san_count"] > MAX_SANS,
+        location = response.headers.get("location")
+        if response.status_code not in {301, 302, 303, 307, 308} or not location:
+            return response, chain
+        if len(chain) >= MAX_REDIRECTS:
+            raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects")
+        next_target = urljoin(current, location)
+        _validate_target(next_target)
+        chain.append({"from": current, "to": next_target, "status": response.status_code})
+        current = next_target
+    raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects")
+
+
+def _client_or_default(client: httpx.AsyncClient | None) -> tuple[httpx.AsyncClient, bool]:
+    if client is not None:
+        return client, False
+    return httpx.AsyncClient(follow_redirects=False, timeout=TIMEOUT_SECONDS), True
+
+
+async def get_response_headers(
+    target: str, client: httpx.AsyncClient | None = None
+) -> dict[str, Any]:
+    http, owned = _client_or_default(client)
+    try:
+        response, redirects = await _fetch(http, target)
+        headers, truncated = _header_map(response)
+        present = [name for name in SECURITY_HEADERS if name in headers]
+        missing = [name for name in SECURITY_HEADERS if name not in headers]
+        final_url = str(response.url)
+        summary = (
+            f"{response.status_code} {response.http_version} on {final_url} — "
+            f"{len(headers)} headers"
+        )
+        result = ResponseHeadersResult(
+            final_url=final_url,
+            status=response.status_code,
+            http_version=response.http_version,
+            redirects=redirects,
+            headers=headers,
+            redacted_headers=sorted(
+                name for name in SENSITIVE_HEADERS if name in response.headers
+            ),
+            security_headers_present=present,
+            security_headers_missing=missing,
+        )
+        return envelope(
+            summary,
+            result.model_dump(mode="json", by_alias=True),
+            truncated,
+        )
+    finally:
+        if owned:
+            await http.aclose()
+
+
+def _cookie_data(set_cookie_headers: list[str]) -> tuple[list[dict[str, Any]], bool]:
+    cookies: list[dict[str, Any]] = []
+    truncated = len(set_cookie_headers) > MAX_COOKIES
+    for raw in set_cookie_headers[:MAX_COOKIES]:
+        parsed = SimpleCookie()
+        parsed.load(raw)
+        for name, morsel in parsed.items():
+            expires, expiry_truncated = _cap(morsel["expires"] or None)
+            cookies.append(
+                {
+                    "name": name,
+                    "value_length": len(morsel.value),
+                    "secure": bool(morsel["secure"]),
+                    "httponly": bool(morsel["httponly"]),
+                    "samesite": morsel["samesite"] or None,
+                    "domain": morsel["domain"] or None,
+                    "path": morsel["path"] or None,
+                    "expires": expires or None,
+                }
+            )
+            truncated = truncated or expiry_truncated
+    truncated = truncated or len(cookies) > MAX_COOKIES
+    return cookies[:MAX_COOKIES], truncated
+
+
+async def get_cookies(target: str, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    http, owned = _client_or_default(client)
+    try:
+        response, redirects = await _fetch(http, target)
+        cookies, truncated = _cookie_data(response.headers.get_list("set-cookie"))
+        result = CookieResult(
+            final_url=str(response.url),
+            status=response.status_code,
+            redirects=redirects,
+            cookies=cookies,
+        )
+        return envelope(
+            f"{len(cookies)} cookies observed on {response.url}",
+            result.model_dump(mode="json", by_alias=True),
+            truncated,
+        )
+    finally:
+        if owned:
+            await http.aclose()
+
+
+def _name(attributes: Any) -> str:
+    return ", ".join("=".join(attribute.value) for attribute in attributes.rdns)
+
+
+def _certificate_info(der: bytes, chain_valid: bool) -> tuple[dict[str, Any], bool]:
+    certificate = x509.load_der_x509_certificate(der, default_backend())
+    now = datetime.now(timezone.utc)
+    not_before = certificate.not_valid_before_utc
+    not_after = certificate.not_valid_after_utc
+    sans: list[str] = []
+    try:
+        extension = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        sans = [str(value) for value in extension.value.get_values_for_type(x509.DNSName)]
+        sans.extend(str(value) for value in extension.value.get_values_for_type(x509.IPAddress))
+    except x509.ExtensionNotFound:
+        pass
+    truncated = len(sans) > MAX_SANS
+    days = math.floor((not_after - now).total_seconds() / 86400)
+    return {
+        "protocol": None,
+        "cipher": None,
+        "chain_valid": chain_valid,
+        "issuer": _name(certificate.issuer),
+        "subject": _name(certificate.subject),
+        "not_before": not_before,
+        "not_after": not_after,
+        "days_to_expiry": days,
+        "sans": sans[:MAX_SANS],
+    }, truncated
+
+
+def _tls_error(exc: BaseException) -> ToolError:
+    if isinstance(exc, TimeoutError):
+        return ToolError("E_TIMEOUT", "TLS connection timed out")
+    if isinstance(exc, (socket.gaierror, ConnectionRefusedError, ConnectionResetError)):
+        return ToolError("E_CONNECT", "TLS connection failed")
+    return ToolError("E_TLS", safe_message(exc, "TLS handshake failed"))
+
+
+def _tls_handshake(target: str) -> tuple[dict[str, Any], bool]:
+    parsed = urlsplit(target)
+    port = parsed.port or 443
+    verified = True
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw:
+            with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
+                der = secure.getpeercert(binary_form=True)
+                info, truncated = _certificate_info(der, True)
+                info["protocol"] = secure.version()
+                info["cipher"] = secure.cipher()[0] if secure.cipher() else None
+                return info, truncated
+    except ssl.SSLCertVerificationError:
+        verified = False
+    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+        raise _tls_error(exc) from exc
+
+    try:
+        context = ssl._create_unverified_context()
+        with socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw:
+            with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
+                der = secure.getpeercert(binary_form=True)
+                info, truncated = _certificate_info(der, verified)
+                info["protocol"] = secure.version()
+                info["cipher"] = secure.cipher()[0] if secure.cipher() else None
+                return info, truncated
+    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+        raise _tls_error(exc) from exc
+
+
+async def get_tls_info(target: str) -> dict[str, Any]:
+    _validate_target(target)
+    if urlsplit(target).scheme != "https":
+        raise ProbeError("E_TLS", "TLS probe requires an https target")
+    info, truncated = await asyncio.to_thread(_tls_handshake, target)
+    parsed = urlsplit(target)
+    result = TLSInfoResult(hostname=parsed.hostname or "", port=parsed.port or 443, **info)
+    return envelope(
+        f"{result.protocol} {result.cipher} on {target}",
+        result.model_dump(mode="json"),
+        truncated,
     )
 
 
-def _handshake(host: str, port: int, timeout: float, *, verify: bool) -> tuple[bytes, str, str]:
-    context = ssl.create_default_context()
-    if not verify:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-    with (
-        socket.create_connection((host, port), timeout=timeout) as raw,
-        context.wrap_socket(raw, server_hostname=host) as tls,
-    ):
-        der = tls.getpeercert(binary_form=True) or b""
-        cipher = (tls.cipher() or ("?",))[0]
-        return der, tls.version() or "?", cipher
+def _cors_headers(headers: httpx.Headers) -> tuple[dict[str, str], bool]:
+    selected = {}
+    truncated = False
+    for name, value in headers.items():
+        if name.lower().startswith("access-control-") or name.lower() == "vary":
+            selected[name.lower()], was_truncated = _cap(value)
+            truncated = truncated or was_truncated
+    return selected, truncated
 
 
-def probe_cors(
-    target: str, origin: str = PROBE_ORIGIN, timeout: float = DEFAULT_TIMEOUT_S
-) -> Envelope:
-    """A simple request and a preflight, both from an origin the target does not know.
+def _vary_includes_origin(*headers: dict[str, str]) -> bool:
+    values = ",".join(header.get("vary", "") for header in headers)
+    return any(token.strip().lower() == "origin" for token in values.split(","))
 
-    `origin` is the origin the probe *claims to be*, sent as a header. No
-    request is made to it, which is why it is not scope-checked.
-    """
-    simple = _fetch(target, headers={"origin": origin}, timeout=timeout)
-    preflight = _fetch(
-        target,
-        method="OPTIONS",
-        headers={
-            "origin": origin,
-            "access-control-request-method": "GET",
-            "access-control-request-headers": "authorization",
-        },
-        timeout=timeout,
-    )
-    analysis = analyse_cors(dict(simple.headers), dict(preflight.headers))
-    if analysis["allow_origin"] is None:
-        summary = "no CORS headers returned (cross-origin reads blocked by default)"
-    elif analysis["credentialed_wildcard"]:
-        summary = "allow-origin '*' with credentials - browsers refuse this combination"
-    elif analysis["reflects_arbitrary_origin"]:
-        summary = f"reflects any origin ({origin} was echoed back)"
-    else:
-        summary = f"allow-origin {analysis['allow_origin']!r}"
-    credentials = "with" if analysis["allow_credentials"] else "without"
-    return Envelope(
-        summary=f"{summary}, {credentials} credentials",
-        data={"probe_origin": origin, "simple_status": simple.status_code, **analysis},
-    )
+
+async def get_cors_policy(target: str, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+    http, owned = _client_or_default(client)
+    try:
+        simple, simple_redirects = await _fetch(http, target, headers={"Origin": TEST_ORIGIN})
+        preflight, preflight_redirects = await _fetch(
+            http,
+            target,
+            method="OPTIONS",
+            headers={
+                "Origin": TEST_ORIGIN,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        simple_headers, simple_truncated = _cors_headers(simple.headers)
+        preflight_headers, preflight_truncated = _cors_headers(preflight.headers)
+        allow_origin = simple_headers.get("access-control-allow-origin") or preflight_headers.get(
+            "access-control-allow-origin"
+        )
+        allow_credentials = (
+            simple_headers.get("access-control-allow-credentials")
+            or preflight_headers.get("access-control-allow-credentials", "")
+        ).lower() == "true"
+        reflected = allow_origin == TEST_ORIGIN
+        wildcard = allow_origin == "*"
+        result = CORSPolicyResult(
+            origin_tested=TEST_ORIGIN,
+            simple=CORSExchange(
+                status=simple.status_code,
+                headers=simple_headers,
+                redirects=simple_redirects,
+            ),
+            preflight=CORSExchange(
+                status=preflight.status_code,
+                headers=preflight_headers,
+                redirects=preflight_redirects,
+            ),
+            allow_origin=allow_origin,
+            allow_credentials=allow_credentials,
+            origin_reflected=reflected,
+            wildcard_origin=wildcard,
+            vary_includes_origin=_vary_includes_origin(simple_headers, preflight_headers),
+        )
+        return envelope(
+            (
+                f"CORS allow-origin={allow_origin or 'absent'} "
+                f"credentials={str(allow_credentials).lower()}"
+            ),
+            result.model_dump(mode="json", by_alias=True),
+            simple_truncated or preflight_truncated,
+        )
+    finally:
+        if owned:
+            await http.aclose()

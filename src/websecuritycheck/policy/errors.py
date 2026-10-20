@@ -22,8 +22,16 @@ from __future__ import annotations
 
 import re
 
-#: code -> retry?  Straight from the tool contract.
+#: code -> retry?
+#:
+#: The server half must stay equal to `mcp_servers.websec_tools.errors
+#: .STABLE_ERROR_CODES`, which is the tool layer's own list and the one a
+#: partner's server is written against. A test asserts the two agree, because
+#: a code the server emits and this table has never heard of is silently
+#: demoted to `E_INTERNAL` - unretryable - and a ZAP that was merely not
+#: started yet never gets a second chance.
 ERROR_CODES: dict[str, bool] = {
+    # Transport, declared in ARCHITECTURE.md section 5.3
     "E_INVALID_TARGET": False,  # not a URL, wrong scheme, https-only tool on http
     "E_CONNECT": True,  # DNS or TCP failure
     "E_TIMEOUT": True,  # exceeded the tool timeout
@@ -31,8 +39,16 @@ ERROR_CODES: dict[str, bool] = {
     "E_REDIRECT_LOOP": False,  # more than the declared redirect limit
     "E_HTTP": True,  # other transport-level HTTP error
     "E_INTERNAL": False,  # bug in the tool
-    "E_SERVER_UNAVAILABLE": True,  # MCP server did not start (raised by the SDK)
-    "E_TOOL_MISSING": False,  # a check declares a tool no server provides (SDK)
+    # The recon tools, which shell out to nmap, ZAP and WhatWeb. Added with
+    # the Layer 6 tools; the split below is what the retry hook acts on.
+    "E_TOOL_UNAVAILABLE": True,  # the binary or daemon is not up *yet*
+    "E_TOOL_FAILED": True,  # the subprocess died part-way
+    "E_PARSE": False,  # a malformed document parses the same way twice
+    "E_INVALID_ARGUMENT": False,  # the caller's mistake
+    "E_UNSUPPORTED_INPUT": False,  # likewise
+    # Raised by this SDK rather than by a tool.
+    "E_SERVER_UNAVAILABLE": True,  # MCP server did not start
+    "E_TOOL_MISSING": False,  # a check declares a tool no server provides
 }
 
 #: What a code looks like. Matched as a whole word so `E_TIMEOUT_MS` in some
