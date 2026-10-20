@@ -11,25 +11,28 @@ from .errors import ToolError
 ToolCallable = Callable[..., Awaitable[dict[str, Any]]]
 
 
-def _mcp_error_result(message: str) -> Any:
+def _raise_mcp_tool_error(message: str) -> None:
+    """Raise the SDK exception so MCP serializes the call as ``isError``."""
     try:
-        from mcp.types import CallToolResult, TextContent
+        from mcp.server.mcpserver.exceptions import ToolError as MCPToolError
     except ImportError:
-        raise RuntimeError(message) from None
-    content = [TextContent(type="text", text=message)]
-    try:
-        return CallToolResult(content=content, isError=True)
-    except TypeError:
-        return CallToolResult(content=content, is_error=True)
+        try:
+            from mcp.server.exceptions import ToolError as MCPToolError
+        except ImportError:
+            try:
+                from mcp.server.fastmcp.exceptions import ToolError as MCPToolError
+            except ImportError:
+                raise RuntimeError(message) from None
+    raise MCPToolError(message)
 
 
 async def _invoke(tool: ToolCallable, *args: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         return await tool(*args, **kwargs)
     except ToolError as exc:
-        return _mcp_error_result(exc.public_message)
+        _raise_mcp_tool_error(exc.public_message)
     except Exception:
-        return _mcp_error_result("E_INTERNAL: tool failed")
+        _raise_mcp_tool_error("E_INTERNAL: tool failed")
     raise AssertionError("unreachable")
 
 
@@ -113,11 +116,20 @@ TOOLS = (
 
 def main() -> None:
     try:
-        from mcp.server.fastmcp import FastMCP
+        from mcp.server.mcpserver import MCPServer
     except ImportError as exc:
-        raise RuntimeError("Install the mcp dependency to run websec-tools") from exc
+        try:
+            from mcp.server import MCPServer
+        except ImportError:
+            try:
+                from mcp.server.fastmcp import FastMCP as MCPServer
+            except ImportError:
+                raise RuntimeError(
+                    "The installed MCP SDK does not expose MCPServer; "
+                    "install a compatible mcp package"
+                ) from exc
 
-    server = FastMCP("websec-tools")
+    server = MCPServer("websec-tools")
 
     for tool in TOOLS:
         server.tool()(tool)
