@@ -82,6 +82,15 @@ class TraceCollector:
     steps: list[TraceStep] = field(default_factory=list)
     _next: int = 1
 
+    measured: int = 0
+    """Successful tool calls, counted **before** the level filter.
+
+    `decide_status` needs this number, and `level="off"` would otherwise
+    take it to zero - turning "do not print a trace" into "every run
+    failed", because a run that called no tool is never `passed`. Counting
+    and reporting are different jobs; only the second one is configurable.
+    """
+
     # -- writing ---------------------------------------------------------
 
     def record(
@@ -119,7 +128,12 @@ class TraceCollector:
 
     @property
     def tools_ran(self) -> int:
-        return sum(1 for step in self.steps if step.measured)
+        """How many tool calls actually measured something.
+
+        Read from the counter, not from `steps`, so it survives
+        `level="off"`.
+        """
+        return self.measured
 
     def last_tool_step(self, name: str) -> TraceStep | None:
         """The most recent call of one tool, for an error to point at."""
@@ -162,6 +176,8 @@ class TraceCollector:
         duration = int(event.duration * 1000) if event.duration is not None else None
         failed = _is_error(event.result)
         text = _text_of(event.result) if failed else ""
+        if not failed:
+            self.measured += 1
         self.record(
             "tool_call",
             name=name,

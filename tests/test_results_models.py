@@ -118,6 +118,23 @@ def test_check_output_schema_hides_id_and_tool_refs() -> None:
     assert "tool_refs" not in properties
 
 
+def test_a_finding_carries_no_remediation() -> None:
+    """This SDK reports what a target does; it does not advise a change.
+
+    Both halves are asserted because they fail differently. The schema check
+    is what the model is *shown* - a `remediation` property would invite the
+    advice whatever the prompt says. The validation check is what the model
+    is *allowed to send* - and it only holds while `extra="forbid"` does, so
+    a refactor that relaxes the config fails here rather than silently
+    reopening the field.
+    """
+    properties = CheckOutput.model_json_schema()["$defs"]["FindingDraft"]["properties"]
+    assert "remediation" not in properties
+
+    with pytest.raises(ValidationError):
+        FindingDraft.model_validate({**draft().model_dump(), "remediation": "Send a CSP header."})
+
+
 def test_a_finding_must_quote_something() -> None:
     with pytest.raises(ValidationError):
         draft(evidence="")

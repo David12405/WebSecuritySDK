@@ -52,7 +52,11 @@ def load_env(path: Path = REPO_ROOT / ".env") -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("target", help="the http(s) URL to check")
-    parser.add_argument("--check", default="headers", help="which check to run (default: headers)")
+    parser.add_argument(
+        "--check",
+        default="all",
+        help="which check to run, or 'all' for every registered one (default: all)",
+    )
     parser.add_argument(
         "--scope",
         action="append",
@@ -83,54 +87,95 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    if args.check not in checker.checks:
+    wanted = list(checker.checks) if args.check == "all" else [args.check]
+    unknown = [name for name in wanted if name not in checker.checks]
+    if unknown:
         known = ", ".join(checker.checks)
-        print(f"error: unknown check {args.check!r}; available: {known}", file=sys.stderr)
+        print(f"error: unknown check {unknown[0]!r}; available: {known}, all", file=sys.stderr)
         return 2
 
-    print(f"check   {args.check}")
+    print(f"check   {', '.join(wanted)}")
     print(f"target  {args.target}")
     print(f"model   {args.model}")
     print(f"scope   {args.scope or [args.target]}\n")
-    print("running (one model call per turn, a few seconds)...\n")
+    print(f"running {len(wanted)} check(s), a few seconds each...\n")
 
-    result = checker.run(args.check, args.target)
+    results = []
+    for name in wanted:
+        result = checker.run(name, args.target)
+        results.append(result)
+        report(result, trace=args.trace != "off")
 
-    print(summary_line(result), "\n")
-
-    if result.findings:
-        print("FINDINGS")
-        for finding in result.findings:
-            print(f"  {SEVERITY_MARK[finding.severity]}  {finding.title}")
-            print(f"        where      {finding.location}")
-            print(f"        evidence   {finding.evidence}")
-            print(f"        fix        {finding.remediation}")
-            print(f"        rests on   {', '.join(finding.tool_refs) or '-'}")
-
-    if result.errors:
-        print("\nERRORS")
-        for error in result.errors:
-            code = f" [{error.code}]" if error.code else ""
-            where = f" ({error.tool})" if error.tool else ""
-            print(f"  {error.kind}{code}{where}: {error.message}")
-
-    if result.trace:
-        print("\nTRACE")
-        for step in result.trace:
-            took = f"  {step.duration_ms} ms" if step.duration_ms is not None else ""
-            print(
-                f"  {step.id:4} {step.kind:13} {step.name:24} {step.status:9} {step.summary}{took}"
-            )
+    if len(results) > 1:
+        overview(results)
 
     if args.json_path:
-        print(f"\nJSON  -> {write_json(result, args.json_path)}")
+        print(f"\nJSON  -> {write_json(results, args.json_path)}")
     if args.sarif_path:
-        print(f"SARIF -> {write_sarif(result, args.sarif_path)}")
+        print(f"SARIF -> {write_sarif(results, args.sarif_path)}")
 
     # `failed` is the only outcome that means the SDK could not do its job.
     # `issues_found` is a working run that found problems, which is a
     # success for this tool and a failure for the target.
-    return 1 if result.status == "failed" else 0
+    return 1 if any(r.status == "failed" for r in results) else 0
+
+
+def report(result, *, trace: bool) -> None:
+    """One check, in full."""
+    print(f"{'=' * 78}\n{summary_line(result)}\n{'=' * 78}")
+
+    for finding in result.findings:
+        print(f"  {SEVERITY_MARK[finding.severity]}  {finding.title}")
+        print(f"        where      {finding.location}")
+        print(f"        evidence   {finding.evidence[:300]}")
+        print(f"        rests on   {', '.join(finding.tool_refs) or '-'}")
+
+    if result.errors:
+        print("  ERRORS")
+        for error in result.errors:
+            code = f" [{error.code}]" if error.code else ""
+            where = f" ({error.tool})" if error.tool else ""
+            print(f"    {error.kind}{code}{where}: {error.message}")
+
+    if trace and result.trace:
+        print("  TRACE")
+        for step in result.trace:
+            took = f"  {step.duration_ms} ms" if step.duration_ms is not None else ""
+            print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}")
+    print()
+
+
+def overview(results) -> None:
+    """The scan as one thing.
+
+    `check_all` returns a list today, so this is the merge done in the
+    example rather than in the SDK. The status line is the honest one: a
+    scan where a check failed has not covered the site, however clean the
+    checks that did run came back.
+    """
+    counts: dict[str, int] = {}
+    for result in results:
+        for finding in result.findings:
+            counts[finding.severity] = counts.get(finding.severity, 0) + 1
+
+    failed = [r.check for r in results if r.status == "failed"]
+    partial = [r.check for r in results if r.status == "partial"]
+    total = sum(counts.values())
+
+    print(f"{'=' * 78}\nSCAN SUMMARY\n{'=' * 78}")
+    for check in results:
+        print(f"  {check.check:10} {check.status:13} {len(check.findings)} finding(s)")
+    print()
+    if total:
+        order = ["critical", "high", "medium", "low", "info"]
+        print("  " + " | ".join(f"{counts[s]} {s}" for s in order if s in counts))
+    else:
+        print("  no findings")
+
+    if failed:
+        print(f"\n  INCOMPLETE: {', '.join(failed)} could not run. The site is not fully checked.")
+    elif partial:
+        print(f"\n  PARTIAL: {', '.join(partial)} hit an error while running.")
 
 
 if __name__ == "__main__":

@@ -85,6 +85,16 @@ class FindingDraft(BaseModel):
 
     `tool_refs` - these are trace step ids, which the harness assigns. The
     model never sees them, so asking for them would only invite invention.
+
+    There is also no `remediation`, and that is a scope decision rather than
+    an omission. This SDK reports what a target does; it does not advise how
+    to change it. The two jobs need different warrants - a finding is backed
+    by a tool result from this run, while a fix is backed by knowledge of a
+    stack the SDK never looked at - and a model asked for both will produce
+    them in the same confident voice. The cost of guessing was measured:
+    asked to remediate `X-XSS-Protection: 0`, the model advised turning the
+    header back on, which reintroduces the vulnerability it was removed for.
+    A report that stays silent on fixes is one a reader cannot be misled by.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -96,7 +106,6 @@ class FindingDraft(BaseModel):
         min_length=1,
         description="Quoted from a tool result in THIS run. Not a restatement of the title.",
     )
-    remediation: str = Field(min_length=1)
     source_tool: str = Field(
         default="",
         description="Name of the tool the evidence was quoted from, if it came from one tool.",
@@ -303,6 +312,15 @@ class CheckResult(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
+    tools_ran: int = 0
+    """How many tool calls measured something.
+
+    Stored rather than counted from `trace`, because the trace is filtered
+    by `trace_level` and the count is not. A result whose trace was turned
+    off still knows it measured the target; deriving the number from a
+    filtered view would report zero and contradict its own status.
+    """
+
     @classmethod
     def build(
         cls,
@@ -316,16 +334,23 @@ class CheckResult(BaseModel):
         run_id: str = "",
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
+        tools_ran: int | None = None,
     ) -> CheckResult:
         """Assemble a result from the model's output and the run's own record.
 
         The runner calls this instead of constructing a `CheckResult` by hand,
-        so `status` is computed from the trace every time rather than passed
-        in by whoever happens to be assembling the result.
+        so `status` is computed from what happened every time rather than
+        passed in by whoever is assembling the result.
+
+        `tools_ran` is counted from the trace when it is not given. Pass it
+        when the trace is filtered - `trace_level="off"` produces no steps
+        at all, and counting those would turn "do not print a trace" into
+        "every run failed".
         """
         errors = list(errors)
         trace = list(trace)
         tool_steps = [step for step in trace if step.measured]
+        measured = len(tool_steps) if tools_ran is None else tools_ran
 
         findings = [
             Finding.from_draft(draft, check, _refs_for(draft, tool_steps))
@@ -333,13 +358,13 @@ class CheckResult(BaseModel):
         ]
         findings.sort(key=lambda f: (-f.rank, f.location, f.title))
 
-        if not tool_steps and NO_TOOL_RAN not in errors:
+        if measured == 0 and NO_TOOL_RAN not in errors:
             errors.append(NO_TOOL_RAN)
 
         return cls(
             check=check,
             target=target,
-            status=decide_status(findings, errors, len(tool_steps)),
+            status=decide_status(findings, errors, measured),
             findings=findings,
             errors=errors,
             diff=diff,
@@ -347,11 +372,8 @@ class CheckResult(BaseModel):
             run_id=run_id,
             started_at=started_at,
             finished_at=finished_at,
+            tools_ran=measured,
         )
-
-    @property
-    def tools_ran(self) -> int:
-        return sum(1 for step in self.trace if step.measured)
 
     @property
     def highest_severity(self) -> Severity | None:

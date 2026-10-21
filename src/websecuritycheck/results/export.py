@@ -167,7 +167,9 @@ def _rules(findings: Sequence[Finding], check: str) -> list[dict[str, Any]]:
             "id": finding.id,
             "shortDescription": {"text": finding.title},
             "fullDescription": {"text": f"{finding.title} ({finding.location})"},
-            "help": {"text": finding.remediation},
+            # No `help`. SARIF viewers render it as the recommendation panel,
+            # and this SDK reports what a target does without advising how to
+            # change it. An empty panel is better than a guessed one.
             "defaultConfiguration": {"level": SARIF_LEVEL[finding.severity]},
             "properties": {
                 "security-severity": SECURITY_SEVERITY[finding.severity],
@@ -199,7 +201,6 @@ def _result(finding: Finding, target: str) -> dict[str, Any]:
         "partialFingerprints": {FINGERPRINT_KEY: finding.id},
         "properties": {
             "severity": finding.severity,
-            "remediation": finding.remediation,
             "evidence": finding.evidence,
             "toolRefs": finding.tool_refs,
         },

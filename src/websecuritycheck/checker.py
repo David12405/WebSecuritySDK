@@ -63,6 +63,18 @@ class SecurityChecker:
         """HSTS, CSP, X-Frame-Options, X-Content-Type-Options, and what leaks."""
         return self.run("headers", target)
 
+    def check_tls(self, target: str) -> CheckResult:
+        """Chain trust, name match, expiry, protocol and cipher. Needs https."""
+        return self.run("tls", target)
+
+    def check_cookies(self, target: str) -> CheckResult:
+        """Secure, HttpOnly, SameSite, scope and lifetime, per cookie."""
+        return self.run("cookies", target)
+
+    def check_cors(self, target: str) -> CheckResult:
+        """Which origins may read the response, and whether credentials go with them."""
+        return self.run("cors", target)
+
     def check_all(self, target: str) -> list[CheckResult]:
         """Every registered check, merged into one list of results."""
         return [self.run(check.name, target) for check in checks.all_checks()]

@@ -15,11 +15,12 @@ from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent
 from strands.vended_plugins.skills import Skill
 
 from websecuritycheck.checks import HEADERS, all_checks, get
+from websecuritycheck.checks.base import SKILLS_DIR
 from websecuritycheck.config import Settings
 from websecuritycheck.engine.models import build_model, split_model
 from websecuritycheck.engine.prompts import system_prompt
 from websecuritycheck.memory.context import framework_tools_for
-from websecuritycheck.results.models import CheckOutput
+from websecuritycheck.results.models import CheckOutput, CheckResult
 from websecuritycheck.telemetry.trace import KINDS_BY_LEVEL, TraceCollector
 from websecuritycheck.tools.mcp import load_server_specs
 
@@ -41,10 +42,35 @@ def test_a_check_declares_its_own_allowlist() -> None:
     assert HEADERS.tools == ("get_response_headers",)
 
 
-def test_the_skill_loads_and_names_the_required_topics() -> None:
-    skill = HEADERS.skill_text()
-    for topic in HEADERS.required_coverage:
-        assert topic in skill.lower(), f"{topic} is required but the skill never mentions it"
+def test_all_four_checks_are_registered() -> None:
+    assert [check.name for check in all_checks()] == ["cookies", "cors", "headers", "tls"]
+
+
+def test_each_check_loads_a_skill_that_names_its_required_topics() -> None:
+    """The two lists describe the same thing and drift apart silently.
+
+    `required_coverage` is what steering will insist on; the skill is what
+    tells the model to look. A topic demanded by one and absent from the
+    other sends every answer back for a topic nobody asked the model to
+    address.
+    """
+    for check in all_checks():
+        skill = check.skill_text().lower()
+        for topic in check.required_coverage:
+            assert topic in skill, f"{check.name}: {topic!r} is required, skill never mentions it"
+
+
+def test_no_two_checks_claim_the_same_tool() -> None:
+    """One site, four checks, and each one owns its evidence.
+
+    Two checks calling the same probe would report the same problem twice
+    into a merged report.
+    """
+    claimed: dict[str, str] = {}
+    for check in all_checks():
+        for tool in check.tools:
+            assert tool not in claimed, f"{tool} claimed by both {claimed[tool]} and {check.name}"
+            claimed[tool] = check.name
 
 
 def write_skill(tmp_path, header: str, body: str = "# Skill: x\n\nmethod"):
@@ -92,6 +118,33 @@ def test_a_malformed_skill_is_refused_rather_than_degraded(tmp_path) -> None:
     folder = write_skill(tmp_path, "name: x")  # no description
     with pytest.raises(Exception, match=r"(?i)description"):
         Skill.from_file(folder, strict=True)
+
+
+def test_every_skill_folder_parses_and_is_named_after_its_folder() -> None:
+    """Covers skills that have no `Check` yet.
+
+    A skill is written before the check that uses it, so `all_checks()` does
+    not see it - and a malformed one would then be found by the first live
+    run rather than by the suite.
+    """
+    folders = sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir())
+    assert folders, "no skill folders found"
+    for folder in folders:
+        skill = Skill.from_file(folder, strict=True)
+        assert skill.name == folder.name
+        assert skill.allowed_tools, f"{skill.name} declares no tools"
+        assert len(skill.instructions) > 500, f"{skill.name} has no method in it"
+
+
+def test_each_skill_says_what_it_is_not_for() -> None:
+    """Four checks look at one response between them; the boundaries must be stated.
+
+    Without it the same missing header is reported by two checks, and the
+    merged report counts one problem twice.
+    """
+    for folder in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
+        skill = Skill.from_file(folder, strict=True)
+        assert "Not " in skill.description or "not " in skill.description, skill.name
 
 
 def test_a_well_formed_skill_folder_loads(tmp_path) -> None:
@@ -261,6 +314,44 @@ def test_a_successful_tool_call_counts_as_measurement() -> None:
     trace = TraceCollector()
     trace._after_tool(after_event())
     assert trace.tools_ran == 1
+
+
+def test_turning_the_trace_off_does_not_make_every_run_fail() -> None:
+    """The bug a live run on a new site exposed.
+
+    `level="off"` records no steps, and `tools_ran` counted from the steps
+    was therefore zero - which the status rule reads as "measured nothing"
+    and turns into `failed`. Counting and reporting are different jobs; only
+    the second is configurable.
+    """
+    trace = TraceCollector(level="off")
+    trace._after_tool(after_event())
+    assert trace.steps == []
+    assert trace.tools_ran == 1
+
+    result = CheckResult.build(
+        check="headers",
+        target="https://myapp.com",
+        output=CheckOutput(),
+        errors=[],
+        trace=trace.steps,
+        tools_ran=trace.tools_ran,
+    )
+    assert result.status == "passed"
+
+
+def test_without_the_count_the_status_falls_back_to_the_trace() -> None:
+    """A caller that keeps a full trace need not pass the number twice."""
+    trace = TraceCollector()
+    trace._after_tool(after_event())
+    result = CheckResult.build(
+        check="headers",
+        target="https://myapp.com",
+        output=CheckOutput(),
+        errors=[],
+        trace=trace.steps,
+    )
+    assert result.status == "passed"
 
 
 def test_a_failed_tool_call_does_not() -> None:

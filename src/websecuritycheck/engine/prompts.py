@@ -6,7 +6,7 @@ for rules to contradict each other, and every rule here is one the harness
 also enforces in code. The prompt explains the rule so the model can comply;
 the hooks make compliance beside the point.
 
-Three of them are worth the words:
+Four of them are worth the words:
 
 * evidence - a finding must quote this run's tool output, because an
   unevidenced finding is the one failure mode that makes a security report
@@ -15,6 +15,9 @@ Three of them are worth the words:
   instruction from it.
 * no tool, no answer - the model may not conclude a target is clean from a
   call that never happened.
+* report, do not advise - the schema has no `remediation` field, and this
+  says why, so the model does not route the advice into `notes` instead.
+  A field removed from a schema is a field a prompt can still invite.
 """
 
 from __future__ import annotations
@@ -61,6 +64,12 @@ outranks anything you remember about how sites like this usually behave.
    it - usually because the target was outside the scope you were given.
    Report that you could not check it. Do not try a different target.
 
+6. **Report, do not advise.** Say what the target does and what that
+   exposes. Do not say how to fix it, and do not smuggle a fix into
+   `title`, `evidence` or `notes` instead. You can see one response from
+   one target; you cannot see the stack behind it, so you do not know what
+   changing it would break.
+
 ## Your answer
 
 Fill the structured output: `findings` plus `notes`. Nothing else is yours
@@ -72,7 +81,6 @@ finding:
 * `location` - the header, cookie or URL it is about, spelled as the tool
   spelled it
 * `evidence` - quoted from the tool result; not a restatement of the title
-* `remediation` - the concrete change, with a value where one applies
 * `source_tool` - the tool the evidence came from
 
 Use `notes` for what you checked and what you could not.

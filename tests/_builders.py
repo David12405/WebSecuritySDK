@@ -20,7 +20,6 @@ def draft(
         severity=kw.pop("severity", "high"),
         location=location,
         evidence=kw.pop("evidence", "Response headers contained no Content-Security-Policy."),
-        remediation=kw.pop("remediation", "Send a Content-Security-Policy header."),
         **kw,
     )
 

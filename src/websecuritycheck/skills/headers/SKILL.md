@@ -119,5 +119,6 @@ attacker would gain, and if nothing, the severity is low.
 - A tool failure is an error, never a finding.
 - If the result says `truncated: true`, say so rather than concluding from a
   partial list.
-- Remediation is the header to send, with a value. "Add CSP" is not
-  remediation; `Content-Security-Policy: default-src 'self'` is.
+- Report, do not advise. Say which header is missing or wrong and what that
+  exposes. Do not say which value to send: you can see one response, not the
+  app behind it, and a CSP that fits this page may break the next one.

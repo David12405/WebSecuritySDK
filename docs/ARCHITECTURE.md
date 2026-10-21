@@ -272,8 +272,8 @@ class FindingDraft(BaseModel):     # what the MODEL fills, extra="forbid"
     severity: Literal["info", "low", "medium", "high", "critical"]
     location: str        # URL, header name, cookie name ...
     evidence: str        # quoted from a tool result in THIS run
-    remediation: str
     source_tool: str     # which tool the evidence came from, "" if unattributed
+                         # no `remediation`: this SDK reports, it does not advise
 
 class Finding(FindingDraft):       # what the DEVELOPER gets
     id: str              # stable across runs, so runs can be diffed

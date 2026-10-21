@@ -3,8 +3,12 @@
 A typed SDK for agentic web-security checks, built on Strands Agents.
 
 Install one package, call one typed method on a target you own, get back a
-structured result — findings, errors, remediation, trace. You never write a
-prompt and never import `strands`.
+structured result — findings, errors, trace. You never write a prompt and
+never import `strands`.
+
+It reports what a target does; it does not advise how to change it. A
+finding is backed by a tool result from this run, and nothing the SDK sees
+tells it what a fix would break.
 
 ```python
 from websecuritycheck import SecurityChecker
