@@ -317,7 +317,7 @@ def summary_line(result: CheckResult) -> str:
         parts.append(f"{len(result.errors)} error(s)")
     parts.append(f"{len(result.findings)} finding(s)")
     parts.append(f"{result.tools_ran} tool call(s)")
-    return " · ".join(parts)
+    return " | ".join(parts)
 
 
 def summary_lines(results: Iterable[CheckResult]) -> str:

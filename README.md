@@ -18,19 +18,25 @@ result.errors     # failures of the SDK, a tool, or the model
 result.trace      # every step the agent took
 ```
 
-> **Status: week 2 of 8.** The tool path and the policy layer work; the agent
-> loop does not exist yet, so `SecurityChecker` above is still a stub. What
-> runs today, with no model credentials:
+> **Status: the `headers` check runs end to end.** The two lines above work
+> today and return a typed result with findings, evidence and a trace.
 >
-> | | |
+> | Working | |
 > |---|---|
-> | Four passive probes, served over MCP | `mcp_servers/websec_tools/` |
-> | Scope guard + tool allowlist, with the `BeforeToolCall` hook | `policy/scope_guard.py` |
-> | Injection guard, with the `AfterToolCall` hook | `policy/injection_guard.py` |
-> | Result schemas, status rules, JSON and SARIF export | `results/` |
-> | Two runnable demos | `examples/` |
+> | `check_headers` — the whole turn, start to report | `checker.py`, `engine/` |
+> | Ten security tools, served over MCP | `mcp_servers/websec_tools/` |
+> | Scope guard + tool allowlist (`BeforeToolCall`) | `policy/scope_guard.py` |
+> | Injection guard (`AfterToolCall`) | `policy/injection_guard.py` |
+> | Trace, status rules, JSON and SARIF export | `telemetry/`, `results/` |
 >
-> `pytest` is 179 tests with no network and no model.
+> | Not written yet | |
+> |---|---|
+> | `cookies`, `tls`, `cors` | a `Check` and a skill document each |
+> | Steering — did the answer cover every required topic? | `policy/steering.py` |
+> | Retry, the run diff, long-term memory | `policy/retry.py`, `memory/` |
+>
+> [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) walks through a check in plain
+> language. `pytest` is 235 tests, no network and no model.
 
 ---
 
@@ -99,3 +105,4 @@ authorised.
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | the layers, the turn diagram, the frozen contracts, the open questions |
 | [docs/GIT_FLOW.md](docs/GIT_FLOW.md) | branches, commits, reviews, releases |
+| [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) | what a check does, in plain language |

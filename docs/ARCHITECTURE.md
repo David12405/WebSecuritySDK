@@ -1,6 +1,6 @@
 # WebSecurityCheck SDK — Architecture
 
-**Version** 0.1 · **Status** init — folder skeleton only, no implementation yet
+**Version** 0.1 · **Status** the `headers` check runs end to end
 **Owner** Duc Dang
 
 This file is the map between the turn diagram and the code. Every module in
