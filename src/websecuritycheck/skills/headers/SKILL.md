@@ -1,3 +1,15 @@
+---
+name: headers
+description: >
+  Judge the HTTP response headers of a site: which defences are absent, which
+  are present but set to something useless, and what the response gives away
+  about the stack behind it. Covers HSTS, CSP, X-Frame-Options and
+  X-Content-Type-Options. Not cookie flags, not TLS, not CORS.
+allowed-tools:
+  - get_response_headers
+owner: security method - partner; format - SDK
+---
+
 # Skill: HTTP security headers
 
 How to judge the response headers of a site. The format is the SDK's; the

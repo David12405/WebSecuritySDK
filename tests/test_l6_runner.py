@@ -181,9 +181,7 @@ async def test_explicit_tool_does_not_run_hidden_nmap(monkeypatch):
     tools = success_tools(calls)
     monkeypatch.setattr(runner, "_tool_calls", lambda: tools)
 
-    report, exit_code = await runner.run_recon(
-        "192.168.56.10", ("get_response_headers",)
-    )
+    report, exit_code = await runner.run_recon("192.168.56.10", ("get_response_headers",))
 
     assert exit_code == 0
     assert calls == [("get_response_headers", "192.168.56.10")]
@@ -203,9 +201,7 @@ async def test_explicit_raw_ip_web_tool_is_error_without_nmap(monkeypatch):
         "_tool_calls",
         lambda: {**success_tools([]), "get_response_headers": headers},
     )
-    report, exit_code = await runner.run_recon(
-        "192.168.56.10", ("get_response_headers",)
-    )
+    report, exit_code = await runner.run_recon("192.168.56.10", ("get_response_headers",))
 
     assert exit_code == 1
     assert calls == ["192.168.56.10"]
@@ -304,9 +300,7 @@ async def test_explicit_openapi_does_not_probe_candidates(monkeypatch):
     tools = success_tools([])
     tools["parse_api_spec"] = parse
     monkeypatch.setattr(runner, "_tool_calls", lambda: tools)
-    report, exit_code = await runner.run_recon(
-        "https://example.com/app/login", ("parse_api_spec",)
-    )
+    report, exit_code = await runner.run_recon("https://example.com/app/login", ("parse_api_spec",))
 
     assert exit_code == 0
     assert calls == ["https://example.com/app/login"]
@@ -319,9 +313,7 @@ def test_main_rejects_mixed_all_mode():
     assert error.value.code == 2
 
 
-def test_main_writes_the_same_deterministic_json_to_stdout_and_file(
-    monkeypatch, capsys, tmp_path
-):
+def test_main_writes_the_same_deterministic_json_to_stdout_and_file(monkeypatch, capsys, tmp_path):
     async def fake_run_recon(_target, _selected):
         return {
             "target": "example.com",

@@ -29,7 +29,9 @@ wrong with it, in a structured form a developer and a CI system will read.
 
 {task}
 
-## Method
+## Method: {skill_name}
+
+{skill_description}
 
 Follow the skill below. It is the agreed method for this check, and it
 outranks anything you remember about how sites like this usually behave.
@@ -78,8 +80,22 @@ Use `notes` for what you checked and what you could not.
 
 
 def system_prompt(check: Check) -> str:
-    """The prompt for one check: the shared rules with its task and skill in."""
-    return SYSTEM_PROMPT.format(task=check.task.strip(), skill=check.skill_text().strip())
+    """The prompt for one check: the shared rules with its task and skill in.
+
+    The whole skill body goes in, not a summary. A skill file carries a
+    short header so a *selector* can read it cheaply and decide whether to
+    load the rest - but this SDK has no selector. The developer calls
+    `check_headers`, so exactly one skill applies and the harness knows
+    which before an agent exists. Loading a header to decide to load the
+    body would be a round trip to answer a question already answered.
+    """
+    skill = check.skill_doc()
+    return SYSTEM_PROMPT.format(
+        task=check.task.strip(),
+        skill_name=skill.name,
+        skill_description=skill.description,
+        skill=skill.body,
+    )
 
 
 def task_message(target: str) -> str:

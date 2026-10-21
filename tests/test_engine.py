@@ -14,7 +14,7 @@ import pytest
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent
 
 from websecuritycheck.checks import HEADERS, all_checks, get, register
-from websecuritycheck.checks.base import Check
+from websecuritycheck.checks.base import Check, SkillDoc
 from websecuritycheck.config import Settings
 from websecuritycheck.engine.models import build_model, split_model
 from websecuritycheck.engine.prompts import system_prompt
@@ -45,6 +45,68 @@ def test_the_skill_loads_and_names_the_required_topics() -> None:
     skill = HEADERS.skill_text()
     for topic in HEADERS.required_coverage:
         assert topic in skill.lower(), f"{topic} is required but the skill never mentions it"
+
+
+def test_the_skill_header_is_parsed() -> None:
+    doc = HEADERS.skill_doc()
+    assert doc.name == "headers"
+    assert "HSTS" in doc.description
+    assert doc.allowed_tools == ("get_response_headers",)
+    assert doc.body.startswith("# Skill:")
+
+
+def test_the_header_is_not_repeated_in_the_body() -> None:
+    """The frontmatter is metadata, not prose the model reads twice."""
+    assert "allowed-tools:" not in HEADERS.skill_text()
+
+
+def test_the_skill_and_the_check_agree_on_the_allowlist() -> None:
+    """Two statements of the allowlist, and they must not drift.
+
+    The `Check` is the one the scope guard enforces - a security boundary
+    belongs in code a reviewer sees in the diff, not in a markdown file a
+    non-engineer edits. The skill states it too so the method is readable on
+    its own, and this test is what keeps the second copy honest.
+    """
+    for check in all_checks():
+        assert check.skill_doc().allowed_tools == check.tools, check.name
+
+
+def skill_file(header: str, body: str = "# Skill: x\n\nmethod") -> str:
+    return f"---\n{header}\n---\n{body}"
+
+
+def test_a_skill_without_frontmatter_is_refused() -> None:
+    with pytest.raises(ValueError, match="no YAML frontmatter"):
+        SkillDoc.parse("# Skill: something\n\nno header here")
+
+
+def test_a_skill_missing_a_required_field_is_refused() -> None:
+    with pytest.raises(ValueError, match="missing description"):
+        SkillDoc.parse(skill_file("name: x"))
+
+
+def test_either_spelling_of_allowed_tools_is_accepted() -> None:
+    """The file is written by hand; the dash and the underscore are equally easy."""
+    dashed = SkillDoc.parse(skill_file("name: x\ndescription: d\nallowed-tools: [a, b]"))
+    under = SkillDoc.parse(skill_file("name: x\ndescription: d\nallowed_tools: [a, b]"))
+    assert dashed.allowed_tools == under.allowed_tools == ("a", "b")
+
+
+def test_a_single_tool_may_be_written_without_a_list() -> None:
+    doc = SkillDoc.parse(skill_file("name: x\ndescription: d\nallowed-tools: only_one"))
+    assert doc.allowed_tools == ("only_one",)
+
+
+def test_a_description_folded_over_several_lines_becomes_one() -> None:
+    """YAML `>` keeps the file readable; the prompt wants a sentence."""
+    doc = SkillDoc.parse(skill_file("name: x\ndescription: >\n  one two\n  three"))
+    assert doc.description == "one two three"
+
+
+def test_extra_frontmatter_keys_are_kept_not_dropped() -> None:
+    doc = SkillDoc.parse(skill_file("name: x\ndescription: d\nowner: the partner"))
+    assert doc.metadata["owner"] == "the partner"
 
 
 def test_an_unknown_check_says_what_is_registered() -> None:
