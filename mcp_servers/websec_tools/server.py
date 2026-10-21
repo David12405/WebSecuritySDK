@@ -1,11 +1,12 @@
-"""Thin MCP transport for the ten Layer 6 security tools."""
+"""Thin MCP transport for the Layer 6 security tools."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from . import nmap, openapi, probes, whatweb, zap
+from . import analysis as analysis_tools
+from . import probes, recon as recon_tools
 from .errors import ToolError
 
 ToolCallable = Callable[..., Awaitable[dict[str, Any]]]
@@ -63,7 +64,7 @@ async def get_cors_policy(target: str) -> dict[str, Any]:
 async def discover_hosts(target: str) -> dict[str, Any]:
     """Discover live hosts using the fixed Nmap host-discovery profile."""
 
-    return await _invoke(nmap.discover_hosts, target)
+    return await _invoke(recon_tools.nmap.discover_hosts, target)
 
 
 async def discover_services(
@@ -73,31 +74,71 @@ async def discover_services(
 ) -> dict[str, Any]:
     """Discover services with a constrained Nmap profile."""
 
-    return await _invoke(nmap.discover_services, target, profile, ports)
+    return await _invoke(recon_tools.nmap.discover_services, target, profile, ports)
 
 
 async def crawl_web(target: str) -> dict[str, Any]:
     """Crawl same-origin URLs using ZAP traditional Spider."""
 
-    return await _invoke(zap.crawl_web, target)
+    return await _invoke(recon_tools.zap.crawl_web, target)
 
 
 async def passive_web_analysis(target: str) -> dict[str, Any]:
     """Run ZAP Spider and return passive scanner signals only."""
 
-    return await _invoke(zap.passive_web_analysis, target)
+    return await _invoke(recon_tools.zap.passive_web_analysis, target)
 
 
 async def fingerprint_web(target: str) -> dict[str, Any]:
     """Fingerprint web technologies with constrained WhatWeb settings."""
 
-    return await _invoke(whatweb.fingerprint_web, target)
+    return await _invoke(recon_tools.whatweb.fingerprint_web, target)
 
 
 async def parse_api_spec(target: str) -> dict[str, Any]:
     """Parse a remote Swagger/OpenAPI document."""
 
-    return await _invoke(openapi.parse_api_spec, target)
+    return await _invoke(recon_tools.openapi.parse_api_spec, target)
+
+
+async def inspect_source_tree(
+    target: str, path: str = ".", max_depth: int = 4
+) -> dict[str, Any]:
+    """Return deterministic repository structure facts."""
+
+    return await _invoke(analysis_tools.source.inspect_source_tree, target, path, max_depth)
+
+
+async def read_source_file(
+    target: str,
+    path: str,
+    start_line: int = 1,
+    end_line: int | None = None,
+) -> dict[str, Any]:
+    """Return a bounded range from an authorized source file."""
+
+    return await _invoke(
+        analysis_tools.source.read_source_file, target, path, start_line, end_line
+    )
+
+
+async def search_source(
+    target: str,
+    query: str,
+    path: str = ".",
+    case_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Search repository source using bounded literal matching."""
+
+    return await _invoke(
+        analysis_tools.source.search_source, target, query, path, case_sensitive
+    )
+
+
+async def analyze_source(target: str, path: str = ".") -> dict[str, Any]:
+    """Run the server-configured Semgrep ruleset over repository source."""
+
+    return await _invoke(analysis_tools.semgrep.analyze_source, target, path)
 
 
 TOOLS = (
@@ -111,6 +152,10 @@ TOOLS = (
     passive_web_analysis,
     fingerprint_web,
     parse_api_spec,
+    inspect_source_tree,
+    read_source_file,
+    search_source,
+    analyze_source,
 )
 
 

@@ -134,6 +134,20 @@ WebSecuritySDK/
 └── tests/
 ```
 
+The Layer 6 MCP package is organized as `recon/` (network/web integrations)
+and `analysis/` (deterministic source tools). It exposes the four analysis
+tools `inspect_source_tree`, `read_source_file`, `search_source`, and
+`analyze_source`. These tools return repository-relative facts only; they do
+not decide exploitability, generate payloads, or produce vulnerability
+verdicts. Source-content exposure is stricter than the policy used for files
+Semgrep may inspect, and sensitive finding content is redacted.
+
+Semgrep is an external executable configured on the MCP host with
+`WEBSEC_SEMGREP_PATH` and `WEBSEC_SEMGREP_RULESET` (defaults `semgrep` and
+`p/default`). Callers cannot supply rules, commands, executable paths, or
+environment variables. The wrapper uses fixed argv, bounded output, a global
+timeout, sanitized environment, and temporary files outside the repository.
+
 Only `checker.py` and `results/` are public. Everything else is internal.
 
 **Terminology.** *Harness* means the whole scaffolding around the model —
