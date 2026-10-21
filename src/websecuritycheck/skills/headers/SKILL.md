@@ -7,7 +7,6 @@ description: >
   X-Content-Type-Options. Not cookie flags, not TLS, not CORS.
 allowed-tools:
   - get_response_headers
-owner: security method - partner; format - SDK
 ---
 
 # Skill: HTTP security headers

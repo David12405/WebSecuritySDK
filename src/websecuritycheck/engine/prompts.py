@@ -94,7 +94,7 @@ def system_prompt(check: Check) -> str:
         task=check.task.strip(),
         skill_name=skill.name,
         skill_description=skill.description,
-        skill=skill.body,
+        skill=skill.instructions.strip(),
     )
 
 
