@@ -75,6 +75,14 @@ Install Semgrep separately; the Python package does not bundle or download it.
 The ruleset and executable are not caller-controlled MCP arguments, and
 Semgrep output is analyzer observation rather than a vulnerability verdict.
 
+For a direct local-fixture smoke test, use the included runner:
+
+```bash
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool inspect_source_tree
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool search_source --query eval
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool analyze_source
+```
+
 ---
 
 ## Scope is required
