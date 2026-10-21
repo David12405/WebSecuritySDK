@@ -10,11 +10,23 @@ does not come up into an `errors[]` entry instead of a traceback.
 is *shown*; the scope guard decides which calls may *run*. They are not
 interchangeable - a filter never looks at a target, and the guard has to
 hold even for a tool that reached the agent some other way. Both, always.
+
+**A server does not inherit our environment.** The MCP SDK gives a stdio
+child only a fixed list - `PATH`, `TEMP`, `APPDATA`, `USERPROFILE` and a few
+more - so a `WEBSEC_*` variable exported in the shell reaches a direct call
+like `examples/probe_target.py` and silently does not reach the same tool
+through this SDK. Anything a tool needs goes in the server's `env:` in
+`servers.yaml`, which the SDK merges over that list rather than replacing
+it. Getting this wrong surfaces as `E_TOOL_UNAVAILABLE` from a tool that
+works fine when run by hand, which is a long way to walk for a missing
+variable.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import os
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +40,9 @@ from ..results.models import ErrorInfo
 
 DEFAULT_STARTUP_TIMEOUT_S = 30
 
+#: `${NAME}` in a server's `env:` value, replaced from our own environment.
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
 
 @dataclass(frozen=True)
 class ServerSpec:
@@ -39,6 +54,24 @@ class ServerSpec:
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     startup_timeout_s: int = DEFAULT_STARTUP_TIMEOUT_S
+
+
+def expand_env(values: Mapping[str, str]) -> dict[str, str]:
+    """Replace `${NAME}` in each value from our own environment.
+
+    `servers.yaml` is committed, and a ZAP API key written into it is a
+    secret in version control. This keeps the file saying *which* variable a
+    server needs while the value stays in the shell or `.env`.
+
+    An unset variable expands to `""` rather than raising. The tool behind
+    it already reports a missing configuration as `E_TOOL_UNAVAILABLE` with
+    the tool named, and that is a better error than a config file refusing
+    to parse because a check nobody is running today wants a key.
+    """
+    return {
+        key: _ENV_REF.sub(lambda m: os.environ.get(m.group(1), ""), value)
+        for key, value in values.items()
+    }
 
 
 def load_server_specs(path: str | Path) -> list[ServerSpec]:
@@ -63,7 +96,7 @@ def load_server_specs(path: str | Path) -> list[ServerSpec]:
                 command=entry["command"],
                 args=tuple(entry.get("args") or ()),
                 cwd=entry.get("cwd"),
-                env=dict(entry.get("env") or {}),
+                env=expand_env(entry.get("env") or {}),
                 startup_timeout_s=int(entry.get("startup_timeout_s", DEFAULT_STARTUP_TIMEOUT_S)),
             )
         )

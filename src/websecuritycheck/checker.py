@@ -75,9 +75,22 @@ class SecurityChecker:
         """Which origins may read the response, and whether credentials go with them."""
         return self.run("cors", target)
 
+    def check_fingerprint(self, target: str) -> CheckResult:
+        """Published versions and components that should not be reachable.
+
+        Needs the WhatWeb binary. Without it the check comes back `failed`
+        with `E_TOOL_UNAVAILABLE` - a fact about the machine, not the
+        target. See `scripts/README.md`.
+        """
+        return self.run("fingerprint", target)
+
     def check_all(self, target: str) -> list[CheckResult]:
-        """Every registered check, merged into one list of results."""
-        return [self.run(check.name, target) for check in checks.all_checks()]
+        """What a scan of a site means today, merged into one list of results.
+
+        Parked checks are left out. `checks` lists everything that can be
+        run by name, which is the larger set.
+        """
+        return [self.run(check.name, target) for check in checks.scan_checks()]
 
     # -- the seam ---------------------------------------------------------
 
@@ -91,4 +104,10 @@ class SecurityChecker:
 
     @property
     def checks(self) -> tuple[str, ...]:
+        """Everything runnable by name, parked checks included."""
         return tuple(check.name for check in checks.all_checks())
+
+    @property
+    def scan_checks(self) -> tuple[str, ...]:
+        """What `check_all` would run."""
+        return tuple(check.name for check in checks.scan_checks())

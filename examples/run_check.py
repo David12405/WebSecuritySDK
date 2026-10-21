@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 from websecuritycheck import SecurityChecker
@@ -87,12 +88,18 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    wanted = list(checker.checks) if args.check == "all" else [args.check]
+    # "all" is the default scan, not every registered check: a parked check
+    # runs only when someone asks for it by name.
+    wanted = list(checker.scan_checks) if args.check == "all" else [args.check]
     unknown = [name for name in wanted if name not in checker.checks]
     if unknown:
         known = ", ".join(checker.checks)
         print(f"error: unknown check {unknown[0]!r}; available: {known}, all", file=sys.stderr)
         return 2
+
+    parked = [name for name in checker.checks if name not in checker.scan_checks]
+    if args.check == "all" and parked:
+        print(f"note    not in a scan: {', '.join(parked)} (run by name to try one)\n")
 
     print(f"check   {', '.join(wanted)}")
     print(f"target  {args.target}")
@@ -129,6 +136,15 @@ def report(result, *, trace: bool) -> None:
         print(f"        where      {finding.location}")
         print(f"        evidence   {finding.evidence[:300]}")
         print(f"        rests on   {', '.join(finding.tool_refs) or '-'}")
+
+    # After the findings, because it is context for them rather than a
+    # headline - but printed always, including on a clean run. A check that
+    # found nothing has still said what it looked at, and leaving that out
+    # is what makes `passed` read as "did nothing".
+    if result.notes:
+        print("  NOTES")
+        for line in textwrap.wrap(result.notes, width=72):
+            print(f"    {line}")
 
     if result.errors:
         print("  ERRORS")

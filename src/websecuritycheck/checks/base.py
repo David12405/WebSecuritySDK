@@ -65,6 +65,16 @@ class Check:
     max_turns: int = 6
     """A loop that has not answered in this many turns is not about to."""
 
+    in_default_scan: bool = True
+    """Does `check_all` run this one?
+
+    False parks a check: it stays registered, stays testable, and stays
+    runnable by name, but a caller who asked for "check this site" does not
+    get it. That is the honest home for a check whose shape is still being
+    argued about - deleting it loses the work, and leaving it in the default
+    scan ships an answer nobody has agreed on.
+    """
+
     @property
     def skill_name(self) -> str:
         return self.skill or self.name
@@ -120,4 +130,15 @@ def get(name: str) -> Check:
 
 
 def all_checks() -> tuple[Check, ...]:
+    """Every registered check, parked ones included.
+
+    This is what the suite iterates: a parked check still has to load its
+    skill, agree with it about the allowlist, and name its coverage topics.
+    A check nobody runs is exactly the one that rots.
+    """
     return tuple(REGISTRY[name] for name in sorted(REGISTRY))
+
+
+def scan_checks() -> tuple[Check, ...]:
+    """What `check_all` runs - the checks a scan of a site means today."""
+    return tuple(check for check in all_checks() if check.in_default_scan)

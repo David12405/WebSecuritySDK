@@ -304,6 +304,19 @@ class CheckResult(BaseModel):
     target: str
     status: Status
     findings: list[Finding] = Field(default_factory=list)
+    notes: str = ""
+    """What the check looked at, in the model's words. Carried through from
+    `CheckOutput.notes`.
+
+    It is the only place an inventory can land. A finding says something is
+    wrong; a check like `fingerprint` spends most of its evidence
+    establishing what is *there*, and "nginx, no version" is an answer worth
+    reading and not a defect worth reporting. Drop this field and a run that
+    examined nine technologies reports two unrelated findings and looks like
+    it never did the work.
+
+    Not a substitute for a finding, and nothing here is scored.
+    """
     errors: list[ErrorInfo] = Field(default_factory=list)
     diff: RunDiff | None = None
     trace: list[TraceStep] = Field(default_factory=list)
@@ -366,6 +379,7 @@ class CheckResult(BaseModel):
             target=target,
             status=decide_status(findings, errors, measured),
             findings=findings,
+            notes=output.notes,
             errors=errors,
             diff=diff,
             trace=trace,

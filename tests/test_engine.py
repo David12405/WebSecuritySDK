@@ -8,13 +8,14 @@ which is the one that decides a run's status.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent
 from strands.vended_plugins.skills import Skill
 
-from websecuritycheck.checks import HEADERS, all_checks, get
+from websecuritycheck.checks import HEADERS, all_checks, get, scan_checks
 from websecuritycheck.checks.base import SKILLS_DIR
 from websecuritycheck.config import Settings
 from websecuritycheck.engine.models import build_model, split_model
@@ -42,8 +43,31 @@ def test_a_check_declares_its_own_allowlist() -> None:
     assert HEADERS.tools == ("get_response_headers",)
 
 
-def test_all_four_checks_are_registered() -> None:
-    assert [check.name for check in all_checks()] == ["cookies", "cors", "headers", "tls"]
+def test_every_check_is_registered() -> None:
+    assert [check.name for check in all_checks()] == [
+        "cookies",
+        "cors",
+        "fingerprint",
+        "headers",
+        "tls",
+    ]
+
+
+def test_a_scan_leaves_out_the_parked_checks() -> None:
+    """`check_all` is a promise about a site, not a list of everything written.
+
+    `fingerprint` is registered, tested and runnable by name, and it is not
+    part of what "check this site" means - its findings rested on the page
+    title, which is a string the target chooses. A check that is still being
+    argued about does not get to answer on a developer's behalf.
+    """
+    assert [check.name for check in scan_checks()] == ["cookies", "cors", "headers", "tls"]
+    assert "fingerprint" in [check.name for check in all_checks()]
+
+
+def test_a_parked_check_is_still_runnable_by_name() -> None:
+    """Parked is not deleted. The work stays reachable."""
+    assert get("fingerprint").in_default_scan is False
 
 
 def test_each_check_loads_a_skill_that_names_its_required_topics() -> None:
@@ -259,6 +283,49 @@ def test_an_unsupported_transport_is_refused(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="only the stdio transport"):
         load_server_specs(config)
+
+
+def write_env_config(tmp_path, value: str):
+    config = tmp_path / "servers.yaml"
+    config.write_text(
+        "servers:\n"
+        "  - name: ours\n"
+        "    transport: stdio\n"
+        "    command: python\n"
+        f"    env:\n      WEBSEC_THING: '{value}'\n",
+        encoding="utf-8",
+    )
+    return config
+
+
+def test_a_server_env_value_is_read_from_our_environment(tmp_path, monkeypatch) -> None:
+    """So a secret stays out of a committed config file."""
+    monkeypatch.setenv("WEBSEC_TEST_KEY", "s3cret")
+    specs = load_server_specs(write_env_config(tmp_path, "${WEBSEC_TEST_KEY}"))
+    assert specs[0].env == {"WEBSEC_THING": "s3cret"}
+
+
+def test_an_unset_variable_expands_to_empty_rather_than_raising(tmp_path, monkeypatch) -> None:
+    """A config file must not refuse to parse over a check nobody is running.
+
+    The tool that needs the value already reports E_TOOL_UNAVAILABLE and
+    names itself, which locates the problem better than a parse error.
+    """
+    monkeypatch.delenv("WEBSEC_TEST_KEY", raising=False)
+    specs = load_server_specs(write_env_config(tmp_path, "${WEBSEC_TEST_KEY}"))
+    assert specs[0].env == {"WEBSEC_THING": ""}
+
+
+def test_the_shipped_config_passes_the_tool_variables_through() -> None:
+    """The one that would be missed.
+
+    An MCP stdio child inherits a fixed list of variables, and no WEBSEC_*
+    is on it. A tool configured only by the shell works when called directly
+    and fails through the SDK, which is a long walk for a missing name.
+    """
+    specs = load_server_specs(Path(__file__).resolve().parent.parent / "config" / "servers.yaml")
+    ours = next(spec for spec in specs if spec.name == "websec-tools")
+    assert "WEBSEC_WHATWEB_PATH" in ours.env
 
 
 # --------------------------------------------------------------------------
