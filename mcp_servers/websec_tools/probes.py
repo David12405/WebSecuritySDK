@@ -8,7 +8,7 @@ import math
 import re
 import socket
 import ssl
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -149,7 +149,7 @@ def _validate_target(target: str) -> None:
         ipaddress.ip_address(ascii_hostname)
     except ValueError:
         if not _HOSTNAME_RE.fullmatch(ascii_hostname):
-            raise ProbeError("E_INVALID_TARGET", "target hostname is invalid")
+            raise ProbeError("E_INVALID_TARGET", "target hostname is invalid") from None
 
 
 def _cap(value: str | None) -> tuple[str, bool]:
@@ -302,13 +302,13 @@ async def get_cookies(target: str, client: httpx.AsyncClient | None = None) -> d
             await http.aclose()
 
 
-def _name(attributes: Any) -> str:
-    return ", ".join("=".join(attribute.value) for attribute in attributes.rdns)
+def _name(attributes: x509.Name) -> str:
+    return attributes.rfc4514_string()
 
 
 def _certificate_info(der: bytes, chain_valid: bool) -> tuple[dict[str, Any], bool]:
     certificate = x509.load_der_x509_certificate(der, default_backend())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     not_before = certificate.not_valid_before_utc
     not_after = certificate.not_valid_after_utc
     sans: list[str] = []
@@ -347,28 +347,32 @@ def _tls_handshake(target: str) -> tuple[dict[str, Any], bool]:
     verified = True
     try:
         context = ssl.create_default_context()
-        with socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw:
-            with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
-                der = secure.getpeercert(binary_form=True)
-                info, truncated = _certificate_info(der, True)
-                info["protocol"] = secure.version()
-                info["cipher"] = secure.cipher()[0] if secure.cipher() else None
-                return info, truncated
+        with (
+            socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw,
+            context.wrap_socket(raw, server_hostname=parsed.hostname) as secure,
+        ):
+            der = secure.getpeercert(binary_form=True)
+            info, truncated = _certificate_info(der, True)
+            info["protocol"] = secure.version()
+            info["cipher"] = secure.cipher()[0] if secure.cipher() else None
+            return info, truncated
     except ssl.SSLCertVerificationError:
         verified = False
-    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+    except (OSError, ssl.SSLError, ValueError) as exc:
         raise _tls_error(exc) from exc
 
     try:
         context = ssl._create_unverified_context()
-        with socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw:
-            with context.wrap_socket(raw, server_hostname=parsed.hostname) as secure:
-                der = secure.getpeercert(binary_form=True)
-                info, truncated = _certificate_info(der, verified)
-                info["protocol"] = secure.version()
-                info["cipher"] = secure.cipher()[0] if secure.cipher() else None
-                return info, truncated
-    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+        with (
+            socket.create_connection((parsed.hostname, port), timeout=TIMEOUT_SECONDS) as raw,
+            context.wrap_socket(raw, server_hostname=parsed.hostname) as secure,
+        ):
+            der = secure.getpeercert(binary_form=True)
+            info, truncated = _certificate_info(der, verified)
+            info["protocol"] = secure.version()
+            info["cipher"] = secure.cipher()[0] if secure.cipher() else None
+            return info, truncated
+    except (OSError, ssl.SSLError, ValueError) as exc:
         raise _tls_error(exc) from exc
 
 
