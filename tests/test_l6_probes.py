@@ -1,9 +1,17 @@
 import asyncio
+import importlib
+import ipaddress
 import json
+import socket
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
 from mcp_servers.websec_tools import probes, server
 
@@ -153,22 +161,73 @@ async def test_timeout_and_invalid_target_errors():
     assert invalid.value.code == "E_INVALID_TARGET"
 
 
-@async_test
-async def test_tls_probe_is_injectable(monkeypatch):
-    info = {
-        "protocol": "TLSv1.3",
-        "cipher": "TLS_AES_256_GCM_SHA384",
-        "chain_valid": True,
-        "issuer": "CA",
-        "subject": "example.com",
-        "not_before": "2025-01-01T00:00:00+00:00",
-        "not_after": "2027-01-01T00:00:00+00:00",
-        "days_to_expiry": 400,
-        "sans": ["example.com"],
-    }
-    monkeypatch.setattr(probes, "_tls_handshake", lambda target: (info, False))
-    result = await probes.get_tls_info("https://example.com")
-    assert result["data"]["protocol"] == "TLSv1.3"
+def test_certificate_info_parses_self_signed_certificate():
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "example.com"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example Org"),
+        ]
+    )
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("example.com"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    info, truncated = probes._certificate_info(
+        certificate.public_bytes(serialization.Encoding.DER), chain_valid=True
+    )
+
+    assert truncated is False
+    assert info["chain_valid"] is True
+    assert info["issuer"] == "O=Example Org,CN=example.com"
+    assert info["subject"] == "O=Example Org,CN=example.com"
+    assert info["sans"] == ["example.com", "127.0.0.1"]
+    assert info["not_before"] < now < info["not_after"]
+    assert 29 <= info["days_to_expiry"] <= 30
+
+
+def test_tls_handshake_preserves_connection_error(monkeypatch):
+    def fail(*args, **kwargs):
+        raise socket.gaierror("host unavailable")
+
+    monkeypatch.setattr(probes.socket, "create_connection", fail)
+    with pytest.raises(probes.ProbeError) as error:
+        probes._tls_handshake("https://example.com")
+
+    assert error.value.code == "E_CONNECT"
+
+
+def _mcp_tool_error_type():
+    for module_name in (
+        "mcp.server.mcpserver.exceptions",
+        "mcp.server.exceptions",
+        "mcp.server.fastmcp.exceptions",
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        error_type = getattr(module, "ToolError", None)
+        if error_type is not None:
+            return error_type
+    pytest.skip("MCP SDK ToolError is unavailable")
 
 
 @async_test
@@ -177,5 +236,5 @@ async def test_mcp_wrappers_keep_probe_errors_stable(monkeypatch):
         raise probes.ProbeError("E_TIMEOUT", "timed out")
 
     monkeypatch.setattr(server.probes, "get_response_headers", fail)
-    with pytest.raises(RuntimeError, match=r"^E_TIMEOUT:"):
+    with pytest.raises(_mcp_tool_error_type(), match=r"^E_TIMEOUT:"):
         await server.get_response_headers("https://example.com")

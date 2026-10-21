@@ -302,8 +302,8 @@ async def get_cookies(target: str, client: httpx.AsyncClient | None = None) -> d
             await http.aclose()
 
 
-def _name(attributes: Any) -> str:
-    return ", ".join("=".join(attribute.value) for attribute in attributes.rdns)
+def _name(attributes: x509.Name) -> str:
+    return attributes.rfc4514_string()
 
 
 def _certificate_info(der: bytes, chain_valid: bool) -> tuple[dict[str, Any], bool]:
@@ -356,7 +356,7 @@ def _tls_handshake(target: str) -> tuple[dict[str, Any], bool]:
                 return info, truncated
     except ssl.SSLCertVerificationError:
         verified = False
-    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+    except (OSError, ssl.SSLError, ValueError) as exc:
         raise _tls_error(exc) from exc
 
     try:
@@ -368,7 +368,7 @@ def _tls_handshake(target: str) -> tuple[dict[str, Any], bool]:
                 info["protocol"] = secure.version()
                 info["cipher"] = secure.cipher()[0] if secure.cipher() else None
                 return info, truncated
-    except (OSError, ssl.SSLError, x509.Error, ValueError) as exc:
+    except (OSError, ssl.SSLError, ValueError) as exc:
         raise _tls_error(exc) from exc
 
 
