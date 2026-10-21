@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .errors import ToolError, envelope
+from ..errors import ToolError, envelope
 
 MAX_HOSTS = 256
 MAX_PORTS = 100

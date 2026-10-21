@@ -121,6 +121,7 @@ WebSecuritySDK/
 │   ├── telemetry/               spans + hook events -> result.trace
 │   └── skills/                  SKILL.md folders, one per check
 ├── mcp_servers/websec_tools/  L6  constrained security tool server
+│   └── recon/                 reconnaissance tool implementations
 │   ├── server.py                MCP tool definitions
 │   ├── probes.py                HTTP, TLS and CORS probes
 │   ├── errors.py                stable tool errors and safe redaction
