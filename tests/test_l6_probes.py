@@ -3,7 +3,7 @@ import importlib
 import ipaddress
 import json
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import wraps
 
 import httpx
@@ -169,7 +169,7 @@ def test_certificate_info_parses_self_signed_certificate():
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Example Org"),
         ]
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     certificate = (
         x509.CertificateBuilder()
         .subject_name(name)
