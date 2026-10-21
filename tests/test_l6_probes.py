@@ -80,9 +80,7 @@ async def test_cookie_probe_never_returns_cookie_value():
     async def handler(request):
         return httpx.Response(
             200,
-            headers={
-                "set-cookie": "session=super-secret; Secure; HttpOnly; SameSite=Lax; Path=/"
-            },
+            headers={"set-cookie": "session=super-secret; Secure; HttpOnly; SameSite=Lax; Path=/"},
             request=request,
         )
 
@@ -91,10 +89,18 @@ async def test_cookie_probe_never_returns_cookie_value():
 
     serialized = json.dumps(result)
     assert "super-secret" not in serialized
-    assert result["data"]["cookies"] == [{
-        "name": "session", "value_length": 12, "secure": True, "httponly": True,
-        "samesite": "Lax", "domain": None, "path": "/", "expires": None,
-    }]
+    assert result["data"]["cookies"] == [
+        {
+            "name": "session",
+            "value_length": 12,
+            "secure": True,
+            "httponly": True,
+            "samesite": "Lax",
+            "domain": None,
+            "path": "/",
+            "expires": None,
+        }
+    ]
 
 
 @async_test

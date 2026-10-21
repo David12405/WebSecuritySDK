@@ -1,6 +1,6 @@
 # WebSecurityCheck SDK — Architecture
 
-**Version** 0.1 · **Status** init — folder skeleton only, no implementation yet
+**Version** 0.1 · **Status** the `headers` check runs end to end
 **Owner** Duc Dang
 
 This file is the map between the turn diagram and the code. Every module in
@@ -193,7 +193,16 @@ result.
 
 ### 5.3 Tool errors
 
-An MCP `isError` result whose text begins with a stable code.
+An MCP `isError` result whose text **contains** a stable code as its first
+word after any framework prefix.
+
+> **Amended 2026-10-20, needs the partner's confirmation.** This said "begins
+> with a stable code" until the first live server run. The MCP SDK prefixes
+> every tool error with `Error executing tool <name>: `, including a
+> deliberate `ToolError` whose message the server chose, so the code can
+> never be first on the wire. `policy/errors.code_of()` finds the first
+> declared code anywhere in the text; an undeclared `E_*` spelling is
+> reported as `E_INTERNAL` rather than guessed at.
 
 | Code | Meaning | Retry? |
 |---|---|---|
@@ -263,8 +272,8 @@ class FindingDraft(BaseModel):     # what the MODEL fills, extra="forbid"
     severity: Literal["info", "low", "medium", "high", "critical"]
     location: str        # URL, header name, cookie name ...
     evidence: str        # quoted from a tool result in THIS run
-    remediation: str
     source_tool: str     # which tool the evidence came from, "" if unattributed
+                         # no `remediation`: this SDK reports, it does not advise
 
 class Finding(FindingDraft):       # what the DEVELOPER gets
     id: str              # stable across runs, so runs can be diffed

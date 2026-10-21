@@ -3,8 +3,12 @@
 A typed SDK for agentic web-security checks, built on Strands Agents.
 
 Install one package, call one typed method on a target you own, get back a
-structured result — findings, errors, remediation, trace. You never write a
-prompt and never import `strands`.
+structured result — findings, errors, trace. You never write a prompt and
+never import `strands`.
+
+It reports what a target does; it does not advise how to change it. A
+finding is backed by a tool result from this run, and nothing the SDK sees
+tells it what a fix would break.
 
 ```python
 from websecuritycheck import SecurityChecker
@@ -18,10 +22,25 @@ result.errors     # failures of the SDK, a tool, or the model
 result.trace      # every step the agent took
 ```
 
-> **Status: init.** This repository currently holds the folder skeleton and the
-> contracts. Every module carries a docstring naming its job and the step of
-> the turn diagram it serves; none of them have an implementation yet. Nothing
-> below runs.
+> **Status: the `headers` check runs end to end.** The two lines above work
+> today and return a typed result with findings, evidence and a trace.
+>
+> | Working | |
+> |---|---|
+> | `check_headers` — the whole turn, start to report | `checker.py`, `engine/` |
+> | Ten security tools, served over MCP | `mcp_servers/websec_tools/` |
+> | Scope guard + tool allowlist (`BeforeToolCall`) | `policy/scope_guard.py` |
+> | Injection guard (`AfterToolCall`) | `policy/injection_guard.py` |
+> | Trace, status rules, JSON and SARIF export | `telemetry/`, `results/` |
+>
+> | Not written yet | |
+> |---|---|
+> | `cookies`, `tls`, `cors` | a `Check` and a skill document each |
+> | Steering — did the answer cover every required topic? | `policy/steering.py` |
+> | Retry, the run diff, long-term memory | `policy/retry.py`, `memory/` |
+>
+> [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) walks through a check in plain
+> language. `pytest` is 235 tests, no network and no model.
 
 ---
 
@@ -38,25 +57,32 @@ result.trace      # every step the agent took
 
 ---
 
-## Install (once there is something to install)
+## Install
 
 ```bash
 pip install -e ".[dev]"
-cp .env.example .env     # then fill in the key for your provider
+cp .env.example .env     # only needed for a full agent run, later
 ```
+
+The examples import the package, so the editable install is the one setup
+step. Without it they fail with `ModuleNotFoundError: websecuritycheck`.
 
 ## Run
 
 ```bash
-# investigate a site through the MCP tools — no model needed
+# probe a site through a real MCP subprocess — no model needed
 python examples/probe_target.py https://example.com
+python examples/probe_target.py https://example.com --scope https://other.test  # watch it block
+python examples/probe_target.py https://example.com --json report.json
 
-# one full agent run — needs model credentials
-python examples/run_check.py https://example.com --check headers
+# watch the policy hooks decide, on hand-built events — no network either
+python examples/inspect_hooks.py
 
 # tests: no network, no model
 pytest
 ```
+
+`examples/run_check.py` — one full agent run — is not written yet.
 
 ---
 
@@ -83,3 +109,4 @@ authorised.
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | the layers, the turn diagram, the frozen contracts, the open questions |
 | [docs/GIT_FLOW.md](docs/GIT_FLOW.md) | branches, commits, reviews, releases |
+| [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) | what a check does, in plain language |
