@@ -5,8 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from mcp_servers.websec_tools import nmap, openapi, server, whatweb, zap
+from mcp_servers.websec_tools import server
 from mcp_servers.websec_tools.errors import ToolError
+
+try:
+    from mcp_servers.websec_tools import recon as recon_tools
+except ImportError:
+    from mcp_servers.websec_tools import nmap, openapi, whatweb, zap
+else:
+    nmap, openapi, whatweb, zap = (
+        recon_tools.nmap,
+        recon_tools.openapi,
+        recon_tools.whatweb,
+        recon_tools.zap,
+    )
 
 
 def async_test(function):

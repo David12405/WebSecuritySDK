@@ -6,7 +6,20 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from . import analysis as analysis_tools
-from . import probes, recon as recon_tools
+from . import probes
+
+try:
+    from . import recon as recon_tools
+except ImportError:  # Compatibility while the recon package is not merged.
+    from . import nmap, openapi, whatweb, zap
+
+    class _FlatReconTools:
+        nmap = nmap
+        openapi = openapi
+        whatweb = whatweb
+        zap = zap
+
+    recon_tools = _FlatReconTools()
 from .errors import ToolError
 
 ToolCallable = Callable[..., Awaitable[dict[str, Any]]]
