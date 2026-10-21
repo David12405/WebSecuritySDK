@@ -12,8 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .errors import ToolError, envelope
-from .probes import _validate_target
+from ..errors import ToolError, envelope
+from ..probes import _validate_target
 
 MAX_OUTPUT_BYTES = 10 * 1024 * 1024
 WHATWEB_TIMEOUT_SECONDS = 60.0

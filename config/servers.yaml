@@ -3,6 +3,14 @@
 # Transport per server is part of the partner contract: stdio servers are
 # started by us, HTTP servers are started by whoever owns them. Swapping our
 # reference server for a partner's is a change in this file and nowhere else.
+#
+# `env:` is how a tool gets configuration. A stdio server is a child process
+# and the MCP SDK hands it only a fixed list of variables - PATH, TEMP and a
+# handful more - so exporting WEBSEC_WHATWEB_PATH in your shell reaches
+# examples/probe_target.py and does not reach the same tool through the SDK.
+# `${NAME}` is read from our environment at load time, so a secret stays in
+# .env instead of being committed here. An unset variable expands to "" and
+# the tool that needs it reports E_TOOL_UNAVAILABLE naming itself.
 
 servers:
   # Our own reference server. Always available, no partner dependency.
@@ -13,6 +21,16 @@ servers:
     cwd: "."
     startup_timeout_s: 30
     enabled: true
+    env:
+      # WhatWeb is a Linux binary; on Windows this points at the WSL shim.
+      # See scripts/README.md. Unset on Linux, where "whatweb" is on PATH.
+      WEBSEC_WHATWEB_PATH: "${WEBSEC_WHATWEB_PATH}"
+      # ZAP. No check uses these yet - crawl_web and passive_web_analysis
+      # are active traffic and ARCHITECTURE.md 4.4 has not been settled.
+      # Wired now so that turning them on is a Check, not a hunt for why
+      # the tool cannot see its own daemon.
+      WEBSEC_ZAP_BASE_URL: "${WEBSEC_ZAP_BASE_URL}"
+      WEBSEC_ZAP_API_KEY: "${WEBSEC_ZAP_API_KEY}"
 
   # Partner's server. Fill in once the transport is agreed.
   - name: partner-websec

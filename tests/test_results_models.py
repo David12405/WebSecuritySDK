@@ -118,6 +118,55 @@ def test_check_output_schema_hides_id_and_tool_refs() -> None:
     assert "tool_refs" not in properties
 
 
+def test_notes_reach_the_developer() -> None:
+    """The half of the model's output that is not a finding.
+
+    The prompt asks for `notes` in five places and the skills in four more,
+    and for a while nothing carried it past `CheckOutput` - so a run that
+    inventoried nine technologies returned two unrelated findings and read
+    like a check that had not done the work.
+    """
+    result = CheckResult.build(
+        check="fingerprint",
+        target="https://example.com",
+        output=CheckOutput(findings=[], notes="nginx, no version. Cloudflare in front."),
+        errors=[],
+        trace=[tool_step()],
+    )
+    assert result.notes == "nginx, no version. Cloudflare in front."
+    assert result.status == "passed"
+
+
+def test_notes_are_not_scored() -> None:
+    """`notes` says what is there; only findings say what is wrong."""
+    result = CheckResult.build(
+        check="fingerprint",
+        target="https://example.com",
+        output=CheckOutput(findings=[], notes="Apache 2.4.29 and PHP 7.2 are both ancient."),
+        errors=[],
+        trace=[tool_step()],
+    )
+    assert result.status == "passed"
+    assert result.findings == []
+
+
+def test_a_finding_carries_no_remediation() -> None:
+    """This SDK reports what a target does; it does not advise a change.
+
+    Both halves are asserted because they fail differently. The schema check
+    is what the model is *shown* - a `remediation` property would invite the
+    advice whatever the prompt says. The validation check is what the model
+    is *allowed to send* - and it only holds while `extra="forbid"` does, so
+    a refactor that relaxes the config fails here rather than silently
+    reopening the field.
+    """
+    properties = CheckOutput.model_json_schema()["$defs"]["FindingDraft"]["properties"]
+    assert "remediation" not in properties
+
+    with pytest.raises(ValidationError):
+        FindingDraft.model_validate({**draft().model_dump(), "remediation": "Send a CSP header."})
+
+
 def test_a_finding_must_quote_something() -> None:
     with pytest.raises(ValidationError):
         draft(evidence="")

@@ -13,8 +13,8 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from .errors import ToolError, envelope, safe_message
-from .probes import _validate_target
+from ..errors import ToolError, envelope, safe_message
+from ..probes import _validate_target
 
 ZAP_TIMEOUT_SECONDS = 300.0
 ZAP_POLL_SECONDS = 0.2
