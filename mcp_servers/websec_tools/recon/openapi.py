@@ -11,8 +11,8 @@ import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from .errors import ToolError, envelope
-from .probes import _client_or_default, _fetch, _validate_target
+from ..errors import ToolError, envelope
+from ..probes import _client_or_default, _fetch, _validate_target
 
 MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
 MAX_REF_DEPTH = 20

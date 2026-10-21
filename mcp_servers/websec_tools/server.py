@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from . import nmap, openapi, probes, whatweb, zap
+from . import probes
+from . import recon as recon_tools
 from .errors import ToolError
 
 ToolCallable = Callable[..., Awaitable[dict[str, Any]]]
@@ -63,7 +64,7 @@ async def get_cors_policy(target: str) -> dict[str, Any]:
 async def discover_hosts(target: str) -> dict[str, Any]:
     """Discover live hosts using the fixed Nmap host-discovery profile."""
 
-    return await _invoke(nmap.discover_hosts, target)
+    return await _invoke(recon_tools.nmap.discover_hosts, target)
 
 
 async def discover_services(
@@ -73,31 +74,31 @@ async def discover_services(
 ) -> dict[str, Any]:
     """Discover services with a constrained Nmap profile."""
 
-    return await _invoke(nmap.discover_services, target, profile, ports)
+    return await _invoke(recon_tools.nmap.discover_services, target, profile, ports)
 
 
 async def crawl_web(target: str) -> dict[str, Any]:
     """Crawl same-origin URLs using ZAP traditional Spider."""
 
-    return await _invoke(zap.crawl_web, target)
+    return await _invoke(recon_tools.zap.crawl_web, target)
 
 
 async def passive_web_analysis(target: str) -> dict[str, Any]:
     """Run ZAP Spider and return passive scanner signals only."""
 
-    return await _invoke(zap.passive_web_analysis, target)
+    return await _invoke(recon_tools.zap.passive_web_analysis, target)
 
 
 async def fingerprint_web(target: str) -> dict[str, Any]:
     """Fingerprint web technologies with constrained WhatWeb settings."""
 
-    return await _invoke(whatweb.fingerprint_web, target)
+    return await _invoke(recon_tools.whatweb.fingerprint_web, target)
 
 
 async def parse_api_spec(target: str) -> dict[str, Any]:
     """Parse a remote Swagger/OpenAPI document."""
 
-    return await _invoke(openapi.parse_api_spec, target)
+    return await _invoke(recon_tools.openapi.parse_api_spec, target)
 
 
 TOOLS = (
