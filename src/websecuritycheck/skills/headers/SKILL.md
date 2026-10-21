@@ -24,17 +24,33 @@ you never received — absence of evidence is not evidence of absence.
 
 ## Method
 
-1. Read `security_headers_missing`. Each entry is a candidate finding.
-2. Read `security_headers_present` and judge each value, not just its
-   presence. A header that is set to something useless is worse than a
-   missing one, because it looks handled.
-3. Read `information_disclosure`. A version number is a finding; a bare
-   product name usually is not.
-4. Check `status` and `redirect_chain`. Headers on a 301 say nothing about
-   the page the user lands on — if the chain ended elsewhere, say which
-   response you judged.
+The result has these fields. Read them in this order.
 
-### What "weak" means for the ones that have a value
+| Field | What it is |
+|---|---|
+| `security_headers_missing` | names of the four tracked headers that are absent |
+| `security_headers_present` | names of the ones that are set — **names only, no values** |
+| `headers` | every response header, lowercased, name → value. The values live here |
+| `redacted_headers` | names the tool deliberately blanked. Not findings |
+| `status`, `redirects`, `final_url` | which response you are judging |
+
+1. **Missing.** Each name in `security_headers_missing` is a candidate
+   finding.
+2. **Present but weak.** For each name in `security_headers_present`, look
+   its value up in `headers` and judge the value, not the presence. A header
+   set to something useless is worse than a missing one, because it looks
+   handled.
+3. **Disclosure.** Look in `headers` for `server`, `x-powered-by`,
+   `x-aspnet-version`, `x-generator`, `via`. A version number is a finding;
+   a bare product name usually is not.
+4. **Which response.** If `redirects` is non-empty, the headers you have are
+   from `final_url`, not from the URL that was asked for. Say so.
+
+Anything whose value reads `<redacted>` was blanked by the tool on purpose
+— `set-cookie` and auth headers. That is not a finding and not evidence; it
+means cookies are a different check's job.
+
+### What "weak" means for the four
 
 | Header | Weak when |
 |---|---|
@@ -42,7 +58,24 @@ you never received — absence of evidence is not evidence of absence.
 | `content-security-policy` | contains `unsafe-inline`, `unsafe-eval`, or `default-src *` |
 | `x-frame-options` | anything other than `DENY` or `SAMEORIGIN` |
 | `x-content-type-options` | anything other than `nosniff` |
-| `referrer-policy` | `unsafe-url`, or absent while the site uses query parameters |
+
+The tool tracks these four and no others. A header outside the list — a
+missing `referrer-policy`, say — can still be reported if you see it absent
+from `headers`, but say that you checked it yourself rather than implying
+the tool flagged it.
+
+### Not findings
+
+Advice that was right once and is now wrong is worse than no advice: a
+developer who acts on it makes the site less safe while believing the
+opposite.
+
+| Seen | Why it is not a finding |
+|---|---|
+| `x-xss-protection: 0` | **Correct, and the recommended value.** The browser XSS auditor it disables was removed because it introduced vulnerabilities of its own. Telling anyone to set `1; mode=block` is telling them to turn a hole back on. |
+| `x-xss-protection` absent | Also fine. Modern browsers ignore it. |
+| `server: nginx` or `server: github.com` | A product name with no version is not disclosure worth a finding. A version — `nginx/1.18.0` — is. |
+| `x-frame-options` absent while CSP sets `frame-ancestors` | CSP supersedes it. Report at most `info`. |
 
 ## Must cover
 
