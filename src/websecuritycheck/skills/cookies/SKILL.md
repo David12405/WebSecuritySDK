@@ -68,15 +68,18 @@ For each cookie, in this order:
 
 ### What the name tells you
 
-Judge severity by what the cookie plainly is. These names mean a session or
-an identity, and a missing flag on one of them is far worse than on an
-analytics cookie:
+The name is usually the only clue to what a cookie is worth, and it belongs
+in the finding. These names mean a session or an identity:
 
 `session`, `sess`, `sid`, `auth`, `token`, `jwt`, `login`, `logged_in`,
 `remember`, `csrf`, `xsrf`
 
 A cookie whose name says analytics — `_ga`, `_gid`, `utm_*` — carries no
-authority. A missing `HttpOnly` on it is `low` at most.
+authority, and a missing flag on it allows much less.
+
+Say which kind you are looking at and what the missing flag allows for
+*that* cookie. "`sid` is readable from JavaScript, so an XSS anywhere on
+the site hands over the session" says more than any rating would.
 
 ### SameSite
 
@@ -109,16 +112,18 @@ no cookies at all.** "No cookies were set" is true and does not say which
 attributes you went looking for — and a reader cannot tell a check that
 looked and found nothing from one that never looked.
 
-## Severity
+## Say what it allows, do not rate it
 
-Rank by what the cookie protects.
+Findings carry no severity, and no rating belongs in a title either. Name
+the cookie and say what the missing attribute lets someone do with it:
 
-| | |
+| Instead of | Write |
 |---|---|
-| **high** | a session or auth cookie missing `HttpOnly`, or missing `Secure` on https |
-| **medium** | a session cookie with no `SameSite`, or `SameSite=None` without `Secure` |
-| **low** | a non-authority cookie missing a flag; a cookie widened to all subdomains |
-| **info** | lifetime notes, unstated attributes with a safe browser default |
+| "High: sid missing HttpOnly" | "`sid` has no `HttpOnly`, so any script on the page can read the session cookie" |
+| "Low: _ga missing HttpOnly" | "`_ga` has no `HttpOnly`; it is an analytics cookie and carries no authority" |
+
+The second one still tells a reader it matters less, and it does so by
+saying why rather than by putting a word on it.
 
 ## Reporting rules
 

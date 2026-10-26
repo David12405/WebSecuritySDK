@@ -97,19 +97,20 @@ These four are what the check is asked to answer for. Address each one, even
 when the answer is that it is present and sound — a report that silently
 omits a topic cannot be told apart from one that forgot to look.
 
-## Severity
+## Say what it exposes, do not rate it
 
-Rank by what is exposed on **this** target, not by a table.
+Findings carry no severity, and no rating belongs in a title either. What
+belongs there is what an attacker gains, in plain words:
 
-| | |
+| Instead of | Write |
 |---|---|
-| **high** | The site handles credentials or sessions and has no CSP, or no HSTS on an https site |
-| **medium** | A header is present but weak enough to be bypassed |
-| **low** | A defence-in-depth header is missing on a site with nothing to protect |
-| **info** | Version disclosure, legacy headers, anything with no attack behind it |
+| "Critical: no CSP" | "No Content-Security-Policy, so an injected script runs with the page's privileges" |
+| "High risk: HSTS missing" | "No HSTS, so a first visit over http can be intercepted before the redirect" |
 
-A missing header on a static page with no forms is not a high. Say what an
-attacker would gain, and if nothing, the severity is low.
+The reason is not politeness. A missing CSP on a static page with no forms
+and the same header on a banking login are not the same problem, and one
+response does not tell you which you are looking at. The reader knows what
+their target is for; say what is true and let them weigh it.
 
 ## Reporting rules
 

@@ -43,6 +43,7 @@ from dataclasses import dataclass
 
 from ..checks.base import Check
 from ..results.models import CheckOutput, FindingDraft
+from .judge import JudgeIssue
 
 #: Tokens shorter than this are dropped before matching. Below three
 #: characters a token matches almost anything - `a`, `is`, `80` - and a rule
@@ -72,9 +73,21 @@ class SteeringIssue:
     """The topic or finding title this is about, for the trace."""
 
 
-def tokens(text: str) -> set[str]:
-    """Lowercase alphanumeric runs, short ones dropped."""
-    return {word for word in _WORD.findall(text.lower()) if len(word) >= MIN_TOKEN}
+def tokens(text: str, min_len: int = MIN_TOKEN) -> set[str]:
+    """Lowercase alphanumeric runs, short ones dropped.
+
+    `min_len` is a parameter because the two rules that use this want
+    opposite things from it. Grounding asks whether a location names
+    something a tool said, and there a two-character token matches almost
+    any result - `443`, `com` and `and` would all count as evidence of
+    nothing. The evidence rule asks whether a quote adds anything the title
+    did not have, and there the short tokens are the whole point: against
+    the title `Version disclosure of Apache`, the quote `Apache/2.4.29`
+    adds exactly `2`, `4` and `29`. Dropping them deletes the version
+    number and leaves the rule calling a real quote a restatement - which
+    is what it did on the first live run.
+    """
+    return {word for word in _WORD.findall(text.lower()) if len(word) >= min_len}
 
 
 def _answer_text(output: CheckOutput) -> str:
@@ -170,6 +183,41 @@ def check_grounding(findings: Sequence[FindingDraft], corpus: str) -> list[Steer
     return issues
 
 
+def check_tools_used(tools_seen: set[str], must_call: Sequence[str]) -> list[SteeringIssue]:
+    """Did the run use every tool a complete answer needs?
+
+    The status rule next door only asks whether *any* tool ran, which is
+    the same question while every check declares one tool and stops being
+    the same question the moment one declares two. A check that reads
+    headers and cookies and only ever called headers has measured
+    something, and has not done its job.
+
+    `tools_seen` comes from the collector's counter rather than from the
+    trace steps. Reading the steps would report every tool missing under
+    `trace_level="off"`, which is how "do not print a trace" turned into
+    "every run failed" once already.
+
+    A fact, not a judgement - which is why it is here and not in the
+    model-judged half. Either the call happened or it did not.
+    """
+    issues = []
+    for name in must_call:
+        if name in tools_seen:
+            continue
+        issues.append(
+            SteeringIssue(
+                rule="tools",
+                subject=name,
+                detail=(
+                    f"You have not called {name!r}, and this check cannot be answered "
+                    "without it. Call it now, then answer from what it returns. If it "
+                    "already failed, say so in `notes` rather than answering around it."
+                ),
+            )
+        )
+    return issues
+
+
 def check_evidence(findings: Sequence[FindingDraft]) -> list[SteeringIssue]:
     """Is the evidence a quote, or the title said twice?
 
@@ -183,7 +231,10 @@ def check_evidence(findings: Sequence[FindingDraft]) -> list[SteeringIssue]:
     """
     issues = []
     for draft in findings:
-        if tokens(draft.evidence) - tokens(draft.title):
+        # Every token, however short: a version number is what makes a
+        # quote a quote, and `2.4.29` is three tokens none of which would
+        # survive the grounding rule's threshold.
+        if tokens(draft.evidence, 1) - tokens(draft.title, 1):
             continue
         issues.append(
             SteeringIssue(
@@ -204,13 +255,44 @@ def check_evidence(findings: Sequence[FindingDraft]) -> list[SteeringIssue]:
 # --------------------------------------------------------------------------
 
 
-def review(output: CheckOutput, check: Check, corpus: str) -> list[SteeringIssue]:
-    """Every rule, over one answer. Order is report order, not priority."""
-    return [
+def review(
+    output: CheckOutput,
+    check: Check,
+    corpus: str,
+    *,
+    tools_seen: set[str] | None = None,
+    judged: Sequence[JudgeIssue] = (),
+) -> list[SteeringIssue]:
+    """Every rule, over one answer. Order is report order, not priority.
+
+    `judged` is appended, never consulted. The judge can add a problem the
+    string rules cannot see; it cannot clear one they raised. Written as
+    concatenation rather than as a merge so there is no version of this
+    function where a lenient judging call lets an ungrounded finding
+    through - the property is in the shape of the code, not in a comment
+    asking the next reader to preserve it.
+    """
+    deterministic = [
+        *check_tools_used(tools_seen or set(), check.must_call),
         *check_coverage(output, check.required_coverage),
         *check_grounding(output.findings, corpus),
         *check_evidence(output.findings),
     ]
+    return [*deterministic, *(_from_judge(issue) for issue in judged)]
+
+
+def _from_judge(issue: JudgeIssue) -> SteeringIssue:
+    """One judge verdict as a steering issue.
+
+    The rule is prefixed so a reader of the trace can tell which half of
+    steering spoke. A `judge:follows` step that turns out to be wrong is a
+    different conversation from a `grounding` step that does.
+    """
+    return SteeringIssue(
+        rule=f"judge:{issue.rule}",
+        subject=issue.subject,
+        detail=issue.detail,
+    )
 
 
 def message_for(issues: Sequence[SteeringIssue]) -> str:

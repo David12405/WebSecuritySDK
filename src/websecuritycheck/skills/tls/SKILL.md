@@ -82,8 +82,8 @@ Read `days_to_expiry` and apply **exactly this**:
 
 | `days_to_expiry` | |
 |---|---|
-| less than 0 | **critical** finding — the site is already broken for every visitor |
-| 0 to 14 | **high** finding — renewal is overdue or about to be |
+| less than 0 | a finding — the certificate has expired and the site is already broken for every visitor |
+| 0 to 14 | a finding — renewal is overdue or about to be |
 | **15 or more** | **not a finding.** Report nothing. Do not mention it as a risk |
 
 Fifteen is not a cautious number, it is a deliberate one. Most certificates
@@ -93,8 +93,8 @@ that as a problem puts a finding on every correctly-run site, and a report
 whose findings are mostly noise teaches its reader to skim.
 
 If `days_to_expiry` is 15 or more, the certificate is **fine**. Say so in
-`notes` if you like. Do not write a finding, at any severity, with any
-wording. "Expires soon" at 39 days is wrong.
+`notes` if you like. Do not write a finding, in any wording. "Expires soon"
+at 39 days is wrong.
 
 ## Not findings
 
@@ -120,17 +120,18 @@ fine is not mentioning the validity window at all.
 carry them: the protocol that was negotiated, that the chain verified, and
 how long the certificate has left.
 
-## Severity
+## Say what a visitor sees, do not rate it
 
-Rank by what is exposed on **this** target.
+Findings carry no severity, and no rating belongs in a title either. Say
+what happens to someone opening the site:
 
-| | |
+| Instead of | Write |
 |---|---|
-| **critical** | expired, or a protocol that is broken rather than old |
-| **high** | chain not trusted, name mismatch, expiry within two weeks |
-| **medium** | deprecated protocol still negotiated, expiry within a month |
-| **low** | weak cipher on an otherwise sound configuration |
-| **info** | issuer notes, expiry inside three months |
+| "Critical: certificate expired" | "The certificate expired 3 days ago, so every browser refuses the page with a full-screen warning" |
+| "Medium: deprecated protocol" | "The handshake negotiated TLSv1.0, which current browsers refuse outright" |
+
+A browser's own reaction is the most useful thing you can report: it is
+observable, it is the same for everyone, and it does not need a scale.
 
 ## Reporting rules
 

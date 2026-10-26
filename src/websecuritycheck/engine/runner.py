@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from strands import Agent
@@ -31,8 +32,9 @@ from ..checks.base import Check
 from ..config import Settings
 from ..memory.context import framework_tools_for
 from ..policy.injection_guard import InjectionGuard
+from ..policy.judge import judge
 from ..policy.scope_guard import ScopeGuard, in_scope
-from ..policy.steering import MAX_ROUNDS, message_for, review
+from ..policy.steering import MAX_ROUNDS, SteeringIssue, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
 from ..telemetry.trace import TraceCollector
 from ..tools.mcp import ToolProvider, load_server_specs
@@ -114,10 +116,15 @@ def _run(
 
         trace.record("skill_loaded", name=check.skill_name, summary=f"{check.skill_name}/SKILL.md")
 
+        # Built once and shared with the judge: same provider, same
+        # credentials, and a second build would be a second place for a
+        # model string to be read differently.
+        model = build_model(
+            settings.model, api_key=settings.api_key, temperature=settings.temperature
+        )
+
         agent = Agent(
-            model=build_model(
-                settings.model, api_key=settings.api_key, temperature=settings.temperature
-            ),
+            model=model,
             tools=tools,
             system_prompt=system_prompt(check),
             structured_output_model=check.output_model,
@@ -149,7 +156,7 @@ def _run(
             # Inside the `with`, because a steering round is another model
             # turn and the model may call a tool during it - which needs the
             # servers still running.
-            output = _steer(agent, output, check, injection_guard, trace, errors)
+            output = _steer(agent, output, check, injection_guard, trace, errors, settings, model)
 
     # The guards collected their own refusals while the loop ran.
     errors.extend(scope_guard.errors)
@@ -175,6 +182,8 @@ def _steer(
     injection_guard: InjectionGuard,
     trace: TraceCollector,
     errors: list[ErrorInfo],
+    settings: Settings,
+    model: Any,
 ) -> CheckOutput:
     """Send the answer back while a rule is unmet, up to `MAX_ROUNDS`.
 
@@ -194,8 +203,15 @@ def _steer(
     revision went wrong would make steering more dangerous than the problem
     it is addressing.
     """
-    corpus = injection_guard.corpus()
-    issues = review(output, check, corpus)
+
+    def look(answer: CheckOutput) -> list[SteeringIssue]:
+        corpus = injection_guard.corpus()
+        verdicts = (
+            judge(check, answer, corpus, injection_guard.nonce, model) if settings.use_judge else []
+        )
+        return review(answer, check, corpus, tools_seen=trace.tools_seen, judged=verdicts)
+
+    issues = look(output)
 
     for _round in range(MAX_ROUNDS):
         if not issues:
@@ -207,14 +223,20 @@ def _steer(
         if not isinstance(revised.structured_output, CheckOutput):
             break  # keep the answer we have
         output = revised.structured_output
-        issues = review(output, check, injection_guard.corpus())
+        issues = look(output)
 
     for issue in issues:
+        # The detail, not just the subject. A reader looking at a `partial`
+        # has to be able to tell a real objection from a reviewer being
+        # fussy, and "judge:follows: Missing X-Frame-Options header" tells
+        # them which finding and nothing about what is supposedly wrong
+        # with it.
+        where = f" ({issue.subject})" if issue.subject else ""
         errors.append(
             ErrorInfo(
                 kind="validation",
                 code=f"E_STEERING_{issue.rule.upper()}",
-                message=f"{issue.rule}: {issue.subject or issue.detail}",
+                message=f"{issue.rule}{where}: {issue.detail}",
             )
         )
     return output

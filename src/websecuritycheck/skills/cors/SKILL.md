@@ -70,7 +70,7 @@ The result has these fields.
 | absent | — | Secure default. **Not a finding** |
 | `*` | `false` | Public data, deliberately. Usually fine; note it |
 | `*` | `true` | **Browsers refuse this combination outright.** The site is misconfigured and the rule does not work. Report as a configuration error, not as an exposure |
-| reflected | `false` | Any site can read the response. Severity depends on what the endpoint returns |
+| reflected | `false` | Any site can read the response. What that costs depends on what the endpoint returns |
 | **reflected** | **`true`** | **The worst case.** Any page on the internet can read this endpoint *as the logged-in user*. This is a cross-site data-theft primitive |
 | one fixed origin | either | Intended. Not a finding unless that origin is plainly wrong |
 
@@ -79,7 +79,7 @@ The result has these fields.
 | Seen | Why it is not a finding |
 |---|---|
 | `allow_origin: null` | No CORS headers means no cross-origin reading. That is the default and it is safe. |
-| `Access-Control-Allow-Origin: *` on a public asset | Fonts, images and public JSON are meant to be readable. Say so at `info` if at all. |
+| `Access-Control-Allow-Origin: *` on a public asset | Fonts, images and public JSON are meant to be readable. A line in `notes` at most. |
 | A preflight that returns 404 or 405 | Many servers do not implement `OPTIONS`. Absence of a preflight answer is not a permission. |
 | `allow_origin` naming a partner domain | A deliberate trust relationship. You cannot tell from here that it is wrong. |
 
@@ -92,20 +92,19 @@ Address both, even when the answer is that the site sends neither.
 **Name both in `notes`, in these words.** "No CORS headers were present" is
 true and does not say which two you checked for.
 
-## Severity
+## Say what could be read, do not rate it
 
-Rank by what a hostile page could actually read.
+Findings carry no severity, and no rating belongs in a title either. Say
+who can read what:
 
-| | |
+| Instead of | Write |
 |---|---|
-| **critical** | reflection plus credentials on an endpoint that returns user data |
-| **high** | reflection plus credentials |
-| **medium** | reflection without credentials on a non-public endpoint; `Vary: Origin` missing while the origin is reflected |
-| **low** | wildcard on something that looks non-public |
-| **info** | `*` with credentials disabled; a named third-party origin |
+| "Critical CORS misconfiguration" | "The origin sent in the request is echoed back with `allow_credentials: true`, so any page on the internet can read this endpoint as the logged-in user" |
+| "Medium: wildcard origin" | "`Access-Control-Allow-Origin: *` without credentials, so any site can read this response — public to begin with, unless this path is not" |
 
-One probe tested one URL. If that URL returns nothing sensitive, say the
-severity reflects this endpoint and that other paths were not tested.
+One probe tested one URL. Say which URL, and say that other paths were not
+tested — that limit is part of the finding, and it is the part a rating
+would have hidden.
 
 ## Reporting rules
 

@@ -33,17 +33,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # Vocabularies
 # --------------------------------------------------------------------------
 
-Severity = Literal["info", "low", "medium", "high", "critical"]
-
-#: High-to-low ordering for reports. A report that lists a cookie note above a
-#: missing HSTS header buries the thing the reader opened it for.
-SEVERITY_RANK: dict[Severity, int] = {
-    "critical": 4,
-    "high": 3,
-    "medium": 2,
-    "low": 1,
-    "info": 0,
-}
+#: **There is no severity.** A finding says what the target does and where;
+#: how much it matters is not something one response can settle, and a model
+#: asked to rate it will answer anyway. Measured on this project: severities
+#: moved between identical runs, a reviewing model argued them on every
+#: finding and invented a premise to justify itself, and the pressure to
+#: defend a rating pushed four specific findings into one vague one.
+#:
+#: Dropping the field removes the question rather than forbidding it - the
+#: same move `CheckOutput` makes with `status`. Whoever reads the report
+#: knows their own system and can rank what it says; the SDK knows one
+#: response.
 
 ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection"]
 
@@ -100,7 +100,6 @@ class FindingDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1)
-    severity: Severity
     location: str = Field(min_length=1, description="URL, header name, cookie name ...")
     evidence: str = Field(
         min_length=1,
@@ -173,10 +172,6 @@ class Finding(FindingDraft):
             id=stable_id(check, draft.location, draft.title),
             tool_refs=list(tool_refs),
         )
-
-    @property
-    def rank(self) -> int:
-        return SEVERITY_RANK[self.severity]
 
 
 class ErrorInfo(BaseModel):
@@ -369,7 +364,10 @@ class CheckResult(BaseModel):
             Finding.from_draft(draft, check, _refs_for(draft, tool_steps))
             for draft in output.findings
         ]
-        findings.sort(key=lambda f: (-f.rank, f.location, f.title))
+        # By location, then title. With no severity to rank by, the useful
+        # order is the one that puts a target's findings about the same
+        # header or cookie next to each other.
+        findings.sort(key=lambda f: (f.location, f.title))
 
         if measured == 0 and NO_TOOL_RAN not in errors:
             errors.append(NO_TOOL_RAN)
@@ -389,15 +387,11 @@ class CheckResult(BaseModel):
             tools_ran=measured,
         )
 
-    @property
-    def highest_severity(self) -> Severity | None:
-        return self.findings[0].severity if self.findings else None
-
-    def by_severity(self) -> dict[Severity, list[Finding]]:
-        """Findings grouped for a report, high to low, empty levels omitted."""
-        grouped: dict[Severity, list[Finding]] = {}
+    def by_location(self) -> dict[str, list[Finding]]:
+        """Findings grouped for a report, by what they are about."""
+        grouped: dict[str, list[Finding]] = {}
         for finding in self.findings:
-            grouped.setdefault(finding.severity, []).append(finding)
+            grouped.setdefault(finding.location, []).append(finding)
         return grouped
 
 

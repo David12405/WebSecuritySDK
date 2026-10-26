@@ -78,8 +78,8 @@ point of keeping it as a description rather than as code.
 
 `skills/headers/SKILL.md` is written like a checklist you would hand a junior
 security engineer. When is a header *weak* rather than merely present? What
-counts as high severity on this kind of site? What do you do if the tool
-fails?
+does an attacker actually gain from its absence on this kind of site? What
+do you do if the tool fails?
 
 It is a document on purpose. A security engineer can correct it without
 touching Python, and a reviewer can read the method without reading a prompt

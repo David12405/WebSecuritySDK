@@ -92,7 +92,7 @@ SCENARIOS = [
         "the model's own answer coming back",
         OUTPUT_TOOL,
         {"findings": []},
-        {"findings": [{"title": "No CSP header", "severity": "high"}]},
+        {"findings": [{"title": "No CSP header"}]},
     ),
 ]
 
