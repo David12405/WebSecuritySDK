@@ -10,6 +10,8 @@ TOOL_COVERAGE = {
     "get_cors_policy": "http",
     "discover_hosts": "network",
     "discover_services": "network",
+    "begin_proxy_capture": "zap",
+    "collect_proxy_traffic": "zap",
     "crawl_web": "zap",
     "passive_web_analysis": "zap",
     "fingerprint_web": "whatweb",

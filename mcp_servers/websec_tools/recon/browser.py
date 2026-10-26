@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -92,6 +93,35 @@ def _same_origin(left: str, right: str) -> bool:
     return _origin(left) == _origin(right)
 
 
+def _trusted_proxy() -> dict[str, str] | None:
+    value = os.getenv("WEBSEC_ZAP_PROXY_URL", "").strip()
+    if not value:
+        return None
+    try:
+        _validate_target(value)
+    except ToolError:
+        raise ToolError("E_INVALID_ARGUMENT", "configured browser proxy URL is invalid") from None
+    parsed = urlsplit(value)
+    port = parsed.port
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise ToolError("E_INVALID_ARGUMENT", "configured browser proxy URL is invalid")
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    server = f"{parsed.scheme.lower()}://{host}"
+    if port is not None:
+        server += f":{port}"
+    return {"server": server}
+
+
 def _header_names(headers: dict[str, str]) -> list[str]:
     return sorted(
         name.lower()
@@ -138,6 +168,8 @@ async def explore_browser(
     requested_actions = actions or []
     if len(requested_actions) > MAX_ACTIONS:
         raise ToolError("E_INVALID_ARGUMENT", f"at most {MAX_ACTIONS} browser actions are allowed")
+    if any("proxy" in action or "proxy_url" in action for action in requested_actions):
+        raise ToolError("E_INVALID_ARGUMENT", "browser actions cannot configure a proxy")
     if auth_ref and ("=" in auth_ref or "://" in auth_ref):
         raise ToolError("E_INVALID_ARGUMENT", "auth_ref must be an opaque reference")
     try:
@@ -152,7 +184,8 @@ async def explore_browser(
             playwright = await async_playwright().start()
             owns_playwright = True
         browser = await playwright.chromium.launch(headless=True)
-        context = await browser.new_context()
+        proxy = _trusted_proxy()
+        context = await browser.new_context(**({"proxy": proxy} if proxy else {}))
         page = await context.new_page()
     except ToolError:
         raise

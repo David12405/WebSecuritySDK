@@ -29,6 +29,7 @@ class ObservationType(StrEnum):
 class ObservationSource(StrEnum):
     HTTP_OBSERVATION = "HTTP_OBSERVATION"
     ZAP = "ZAP"
+    ZAP_PROXY = "ZAP_PROXY"
     API_SPEC = "API_SPEC"
     WHATWEB = "WHATWEB"
     BROWSER = "BROWSER"

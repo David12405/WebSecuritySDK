@@ -78,6 +78,8 @@ def _source(result_type: str) -> ObservationSource:
     value = result_type.upper()
     if "OPENAPI" in value or "API_SPEC" in value or "APISPEC" in value:
         return ObservationSource.API_SPEC
+    if value == "ZAP_PROXY_TRAFFIC":
+        return ObservationSource.ZAP_PROXY
     if "ZAP" in value or "CRAWL" in value:
         return ObservationSource.ZAP
     if "WHATWEB" in value or "FINGERPRINT" in value:
@@ -162,12 +164,15 @@ def _http(
     return result
 
 
-def _zap(
-    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+def _zap_items(
+    execution: ToolExecutionResult,
+    allocator: RecordIdAllocator,
+    refs: list[str],
+    items: list[Any],
+    locator_name: str,
 ) -> list[ObservationRecord]:
-    data = _data(execution)
     records: list[ObservationRecord] = []
-    for index, endpoint in enumerate(data.get("endpoints") or data.get("messages") or []):
+    for index, endpoint in enumerate(items):
         if not isinstance(endpoint, dict):
             continue
         url = str(endpoint.get("url") or "")
@@ -198,10 +203,24 @@ def _zap(
                     else [],
                 ),
                 refs,
-                f"endpoints[{index}]",
+                f"{locator_name}[{index}]",
             )
         )
     return records
+
+
+def _zap(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
+    data = _data(execution)
+    return _zap_items(execution, allocator, refs, data.get("endpoints") or [], "endpoints")
+
+
+def _zap_proxy(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
+    data = _data(execution)
+    return _zap_items(execution, allocator, refs, data.get("messages") or [], "messages")
 
 
 def _openapi(
@@ -450,6 +469,8 @@ def extract_observations(
     allocator = allocator or RecordIdAllocator()
     refs = evidence_refs(evidence)
     result_type = execution.result_type.upper()
+    if result_type == "ZAP_PROXY_TRAFFIC":
+        return _zap_proxy(execution, allocator, refs)
     if "ZAP" in result_type or "CRAWL" in result_type:
         return _zap(execution, allocator, refs)
     if "OPENAPI" in result_type or "API_SPEC" in result_type:

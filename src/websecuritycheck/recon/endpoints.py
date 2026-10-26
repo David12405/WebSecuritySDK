@@ -58,6 +58,7 @@ def _source(source: ObservationSource) -> DiscoverySource:
     return {
         ObservationSource.API_SPEC: DiscoverySource.API_SPEC,
         ObservationSource.ZAP: DiscoverySource.CRAWLER,
+        ObservationSource.ZAP_PROXY: DiscoverySource.HTTP_OBSERVATION,
         ObservationSource.BROWSER: DiscoverySource.BROWSER,
         ObservationSource.HTTP_OBSERVATION: DiscoverySource.HTTP_OBSERVATION,
     }.get(source, DiscoverySource.OTHER)

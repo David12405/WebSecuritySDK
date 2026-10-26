@@ -31,6 +31,8 @@ servers:
       # the tool cannot see its own daemon.
       WEBSEC_ZAP_BASE_URL: "${WEBSEC_ZAP_BASE_URL}"
       WEBSEC_ZAP_API_KEY: "${WEBSEC_ZAP_API_KEY}"
+      # Trusted browser proxy configuration; never supplied by Agent actions.
+      WEBSEC_ZAP_PROXY_URL: "${WEBSEC_ZAP_PROXY_URL}"
 
   # Partner's server. Fill in once the transport is agreed.
   - name: partner-websec

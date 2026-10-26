@@ -6,6 +6,8 @@ import asyncio
 import json
 from functools import wraps
 
+import pytest
+
 from mcp_servers.websec_tools.recon import browser
 
 
@@ -130,8 +132,10 @@ class FakeContext:
 class FakeBrowser:
     def __init__(self):
         self.context = FakeContext()
+        self.context_kwargs = []
 
-    async def new_context(self):
+    async def new_context(self, **kwargs):
+        self.context_kwargs.append(kwargs)
         return self.context
 
     async def close(self):
@@ -157,7 +161,8 @@ class FakePlaywright:
 
 
 @async_test
-async def test_browser_actions_network_correlation_forms_redirects_and_redaction():
+async def test_browser_actions_network_correlation_forms_redirects_and_redaction(monkeypatch):
+    monkeypatch.delenv("WEBSEC_ZAP_PROXY_URL", raising=False)
     fake = FakePlaywright()
 
     async def factory():
@@ -189,6 +194,64 @@ async def test_browser_actions_network_correlation_forms_redirects_and_redaction
     )
     assert data["artifact_manifests"][0]["artifact_type"] == "BROWSER_TRACE"
     assert any(item["action_id"] == "ACT-001" for item in data["actions"])
+    assert fake.browser_instance.context_kwargs == [{}]
+
+
+@async_test
+async def test_browser_uses_only_trusted_proxy_configuration(monkeypatch):
+    monkeypatch.setenv("WEBSEC_ZAP_PROXY_URL", "http://127.0.0.1:8080")
+    fake = FakePlaywright()
+
+    async def factory():
+        return fake
+
+    await browser.explore_browser("https://target.test/", actions=[], playwright_factory=factory)
+
+    assert fake.browser_instance.context_kwargs == [
+        {"proxy": {"server": "http://127.0.0.1:8080"}}
+    ]
+    outside_route = next(
+        route
+        for route in fake.browser_instance.context.page.routes
+        if route.request.url.startswith("https://outside.test/")
+    )
+    assert outside_route.aborted is True
+    assert outside_route.continued is False
+
+
+@async_test
+async def test_browser_actions_cannot_override_proxy(monkeypatch):
+    monkeypatch.setenv("WEBSEC_ZAP_PROXY_URL", "http://127.0.0.1:8080")
+    fake = FakePlaywright()
+
+    async def factory():
+        return fake
+
+    with pytest.raises(browser.ToolError) as error:
+        await browser.explore_browser(
+            "https://target.test/",
+            actions=[{"kind": "wait", "selector": "body", "proxy": "http://evil.test"}],
+            playwright_factory=factory,
+        )
+    assert error.value.code == "E_INVALID_ARGUMENT"
+    assert fake.browser_instance.context_kwargs == []
+
+
+@async_test
+async def test_browser_rejects_untrusted_proxy_configuration(monkeypatch):
+    monkeypatch.setenv("WEBSEC_ZAP_PROXY_URL", "http://user:secret@127.0.0.1:8080")
+    fake = FakePlaywright()
+
+    async def factory():
+        return fake
+
+    with pytest.raises(browser.ToolError) as error:
+        await browser.explore_browser(
+            "https://target.test/", actions=[], playwright_factory=factory
+        )
+    assert error.value.code == "E_INVALID_ARGUMENT"
+    assert "secret" not in str(error.value)
+    assert fake.browser_instance.context_kwargs == []
 
 
 @async_test

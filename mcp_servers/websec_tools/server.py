@@ -104,6 +104,18 @@ async def crawl_web(target: str) -> dict[str, Any]:
     return await _invoke(recon_tools.zap.crawl_web, target)
 
 
+async def begin_proxy_capture(target: str) -> dict[str, Any]:
+    """Create an opaque boundary for traffic observed by the configured ZAP proxy."""
+
+    return await _invoke(recon_tools.zap.begin_proxy_capture, target)
+
+
+async def collect_proxy_traffic(target: str, capture_ref: str) -> dict[str, Any]:
+    """Collect sanitized ZAP proxy traffic for one opaque capture boundary."""
+
+    return await _invoke(recon_tools.zap.collect_proxy_traffic, target, capture_ref)
+
+
 async def passive_web_analysis(target: str) -> dict[str, Any]:
     """Run ZAP Spider and return passive scanner signals only."""
 
@@ -130,6 +142,8 @@ TOOLS = (
     get_cors_policy,
     discover_hosts,
     discover_services,
+    begin_proxy_capture,
+    collect_proxy_traffic,
     crawl_web,
     passive_web_analysis,
     fingerprint_web,

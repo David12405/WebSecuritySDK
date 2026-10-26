@@ -186,6 +186,203 @@ async def test_zap_crawl_and_passive_are_stateless_and_safe():
     assert all("apikey" not in params or params["apikey"] == "" for _path, params in calls)
 
 
+@async_test
+async def test_zap_proxy_capture_is_bounded_scoped_redacted_and_spider_free(monkeypatch):
+    zap._CAPTURES.clear()
+    monkeypatch.setattr(zap, "PROXY_MESSAGE_PAGE_SIZE", 2)
+    calls = []
+    message_count_calls = 0
+    raw_messages = [
+        {
+            "requestHeader": (
+                "POST https://user:request-secret@example.com/login?token=secret-query "
+                "HTTP/1.1\r\n"
+                "Host: example.com\r\n"
+                "Authorization: Bearer secret-auth\r\n"
+                "Cookie: sid=secret-cookie\r\n"
+                "Content-Type: application/json\r\n"
+            ),
+            "requestBody": '{"user":{"id":"7"},"password":"secret-body"}',
+            "responseHeader": (
+                "HTTP/1.1 201 Created\r\n"
+                "Content-Type: application/json; charset=utf-8\r\n"
+                "Set-Cookie: sid=secret-response\r\n"
+            ),
+            "responseBody": '{"token":"secret-response-body"}',
+        },
+        {
+            "requestHeader": (
+                "GET https://outside.test/tracker?api_key=secret HTTP/1.1\r\n"
+                "Host: outside.test\r\n"
+            ),
+            "responseHeader": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n",
+        },
+        {
+            "requestHeader": (
+                "POST /profile HTTP/1.1\r\n"
+                "Host: example.com\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n"
+            ),
+            "requestBody": "email=user%40example.com&password=secret-form",
+            "responseHeader": "HTTP/1.1 204 No Content\r\n",
+        },
+    ]
+
+    async def requester(path, params):
+        nonlocal message_count_calls
+        calls.append((path, params))
+        if path.endswith("numberOfMessages/"):
+            message_count_calls += 1
+            return {"numberOfMessages": "10" if message_count_calls == 1 else "13"}
+        if path.endswith("messages/"):
+            start = int(params["start"]) - 10
+            count = int(params["count"])
+            return {"messages": raw_messages[start : start + count]}
+        raise AssertionError(path)
+
+    boundary = await zap.begin_proxy_capture(
+        "https://example.com?token=boundary-secret",
+        base_url="http://zap.invalid",
+        requester=requester,
+    )
+    capture_ref = boundary["data"]["capture_ref"]
+    assert capture_ref.startswith("ZCAP-")
+    assert boundary["data"]["target"] == "https://example.com"
+    assert "boundary-secret" not in json.dumps(boundary)
+    assert "start_message_index" not in json.dumps(boundary)
+
+    result = await zap.collect_proxy_traffic(
+        "https://example.com:443/path?token=collection-secret",
+        capture_ref,
+        base_url="http://zap.invalid",
+        requester=requester,
+    )
+
+    serialized = json.dumps(result)
+    for secret in (
+        "secret-query",
+        "request-secret",
+        "secret-auth",
+        "secret-cookie",
+        "secret-body",
+        "secret-response",
+        "secret-response-body",
+        "secret-form",
+        "collection-secret",
+    ):
+        assert secret not in serialized
+    assert result["data"]["target"] == "https://example.com:443"
+    assert [item["url"] for item in result["data"]["messages"]] == [
+        "https://example.com/login",
+        "https://example.com/profile",
+    ]
+    assert result["data"]["messages"][0]["query_parameter_names"] == ["token"]
+    assert result["data"]["messages"][0]["body_parameter_names"] == [
+        "password",
+        "user",
+        "user.id",
+    ]
+    assert result["data"]["excluded_message_count"] == 1
+    assert result["data"]["artifact_manifests"][0]["redaction_applied"] is True
+    assert not any("spider" in path for path, _params in calls)
+
+    with pytest.raises(ToolError) as reused:
+        await zap.collect_proxy_traffic(
+            "https://example.com",
+            capture_ref,
+            base_url="http://zap.invalid",
+            requester=requester,
+        )
+    assert reused.value.code == "E_INVALID_ARGUMENT"
+
+
+@async_test
+async def test_zap_proxy_capture_is_target_bound_and_expires(monkeypatch):
+    zap._CAPTURES.clear()
+
+    async def requester(path, _params):
+        if path.endswith("numberOfMessages/"):
+            return {"numberOfMessages": "0"}
+        raise AssertionError(path)
+
+    boundary = await zap.begin_proxy_capture(
+        "https://example.com", base_url="http://zap.invalid", requester=requester
+    )
+    capture_ref = boundary["data"]["capture_ref"]
+    with pytest.raises(ToolError) as mismatch:
+        await zap.collect_proxy_traffic(
+            "https://other.example",
+            capture_ref,
+            base_url="http://zap.invalid",
+            requester=requester,
+        )
+    assert mismatch.value.code == "E_SCOPE"
+
+    zap._CAPTURES.clear()
+    monkeypatch.setattr(zap, "CAPTURE_TTL_SECONDS", -1.0)
+    expired = await zap.begin_proxy_capture(
+        "https://example.com", base_url="http://zap.invalid", requester=requester
+    )
+    with pytest.raises(ToolError) as expiry:
+        await zap.collect_proxy_traffic(
+            "https://example.com",
+            expired["data"]["capture_ref"],
+            base_url="http://zap.invalid",
+            requester=requester,
+        )
+    assert expiry.value.code == "E_INVALID_ARGUMENT"
+
+
+@async_test
+async def test_zap_proxy_capture_retries_api_errors_and_counts_overflow(monkeypatch):
+    zap._CAPTURES.clear()
+    monkeypatch.setattr(zap, "MAX_PROXY_MESSAGES", 1)
+    count_calls = 0
+
+    async def requester(path, _params):
+        nonlocal count_calls
+        if path.endswith("numberOfMessages/"):
+            count_calls += 1
+            if count_calls == 2:
+                raise TimeoutError
+            return {"numberOfMessages": "0" if count_calls == 1 else "3"}
+        if path.endswith("messages/"):
+            return {
+                "messages": [
+                    {
+                        "requestHeader": "GET https://example.com/one HTTP/1.1\r\n",
+                        "responseHeader": "HTTP/1.1 200 OK\r\n",
+                    }
+                ]
+            }
+        raise AssertionError(path)
+
+    boundary = await zap.begin_proxy_capture(
+        "https://example.com", base_url="http://zap.invalid", requester=requester
+    )
+    capture_ref = boundary["data"]["capture_ref"]
+    with pytest.raises(ToolError) as transient:
+        await zap.collect_proxy_traffic(
+            "https://example.com",
+            capture_ref,
+            base_url="http://zap.invalid",
+            requester=requester,
+        )
+    assert transient.value.code == "E_TIMEOUT"
+    assert capture_ref in zap._CAPTURES
+
+    result = await zap.collect_proxy_traffic(
+        "https://example.com",
+        capture_ref,
+        base_url="http://zap.invalid",
+        requester=requester,
+    )
+    assert result["data"]["captured_message_count"] == 1
+    assert result["data"]["dropped_message_count"] == 2
+    assert result["truncated"] is True
+    assert capture_ref not in zap._CAPTURES
+
+
 def test_server_registers_all_l6_tools():
     assert [tool.__name__ for tool in server.TOOLS] == [
         "probe_http",
@@ -195,6 +392,8 @@ def test_server_registers_all_l6_tools():
         "get_cors_policy",
         "discover_hosts",
         "discover_services",
+        "begin_proxy_capture",
+        "collect_proxy_traffic",
         "crawl_web",
         "passive_web_analysis",
         "fingerprint_web",

@@ -5,6 +5,8 @@ import pytest
 from websecuritycheck.domain import (
     ArtifactManifest,
     ArtifactType,
+    DiscoverySource,
+    ObservationSource,
     ToolExecutionResult,
     ToolExecutionStatus,
 )
@@ -134,6 +136,35 @@ def test_all_deterministic_recon_result_types_reach_canonical_processing(
     assert len(result.observation_records) == expected_observations
     assert result.updated_target_model is not None
     assert result.updated_target_model.revision == 1
+
+
+def test_zap_proxy_traffic_has_explicit_runtime_provenance_not_crawler_provenance():
+    execution = _execution(
+        {
+            "messages": [
+                {
+                    "url": "https://example.com/proxy-observed",
+                    "scheme": "https",
+                    "host": "example.com",
+                    "path": "/proxy-observed",
+                    "method": "POST",
+                    "status": 201,
+                    "query_parameter_names": ["id"],
+                    "body_parameter_names": ["user.id"],
+                    "source": "zap_proxy",
+                }
+            ]
+        }
+    ).model_copy(update={"result_type": "ZAP_PROXY_TRAFFIC", "tool_id": "zap"})
+
+    result = process_tool_result(execution)
+
+    assert len(result.observation_records) == 1
+    assert result.observation_records[0].source_type is ObservationSource.ZAP_PROXY
+    endpoint = result.updated_target_model.endpoints[0]
+    assert endpoint.discovery_sources == [DiscoverySource.HTTP_OBSERVATION]
+    assert DiscoverySource.CRAWLER not in endpoint.discovery_sources
+    assert endpoint.runtime_observed is True
 
 
 def test_evidence_identity_storage_and_metadata_are_preserved_without_secret_leakage():
