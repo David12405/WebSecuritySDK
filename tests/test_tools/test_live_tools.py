@@ -31,7 +31,10 @@ def async_test(function):
 
 
 def _skip_unavailable(error: ToolError):
-    if error.code in {"E_TOOL_UNAVAILABLE", "E_CONNECT"}:
+    # A lab target can be powered off, not routed, or temporarily filtered.
+    # Treat these as an environment-specific skip rather than a product
+    # assertion failure; deterministic tests cover the tool contract.
+    if error.code in {"E_TOOL_UNAVAILABLE", "E_CONNECT", "E_TIMEOUT"}:
         pytest.skip(f"live dependency unavailable: {error.code}")
     raise error
 
