@@ -114,7 +114,17 @@ attacker would gain, and if nothing, the severity is low.
 ## Reporting rules
 
 - Quote the evidence from the tool result of **this** run. Never from
-  memory of what sites like this usually do.
+  memory of what sites like this usually do. `evidence` names the field the
+  answer came out of and shows what was in it:
+
+  | | |
+  |---|---|
+  | good | `"security_headers_missing": ["content-security-policy", ...]` |
+  | good | `"strict-transport-security": "max-age=0"` |
+  | bad | `"content-security-policy" is missing` — that is the title again, not a quote |
+
+  A missing header is still quotable: the probe lists it in
+  `security_headers_missing`, and that list *is* the measurement.
 - `location` is the header name, exactly as the tool spelled it.
 - A tool failure is an error, never a finding.
 - If the result says `truncated: true`, say so rather than concluding from a

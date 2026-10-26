@@ -104,6 +104,11 @@ authority. A missing `HttpOnly` on it is `low` at most.
 Address all three for the cookies that matter, even when the answer is that
 they are set correctly.
 
+**Name all three in `notes`, in these words, including when the response set
+no cookies at all.** "No cookies were set" is true and does not say which
+attributes you went looking for — and a reader cannot tell a check that
+looked and found nothing from one that never looked.
+
 ## Severity
 
 Rank by what the cookie protects.

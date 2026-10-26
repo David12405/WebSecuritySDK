@@ -89,6 +89,9 @@ The result has these fields.
 
 Address both, even when the answer is that the site sends neither.
 
+**Name both in `notes`, in these words.** "No CORS headers were present" is
+true and does not say which two you checked for.
+
 ## Severity
 
 Rank by what a hostile page could actually read.

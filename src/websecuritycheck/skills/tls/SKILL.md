@@ -116,6 +116,10 @@ Note that a model rarely writes the word "expiry" — it writes "expires in 39
 days" or quotes `not_after`. That is fine; the topic is covered. What is not
 fine is not mentioning the validity window at all.
 
+**All three belong in `notes` on a clean run**, where there is no finding to
+carry them: the protocol that was negotiated, that the chain verified, and
+how long the certificate has left.
+
 ## Severity
 
 Rank by what is exposed on **this** target.

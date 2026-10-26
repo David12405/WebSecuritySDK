@@ -32,6 +32,7 @@ from ..config import Settings
 from ..memory.context import framework_tools_for
 from ..policy.injection_guard import InjectionGuard
 from ..policy.scope_guard import ScopeGuard, in_scope
+from ..policy.steering import MAX_ROUNDS, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
 from ..telemetry.trace import TraceCollector
 from ..tools.mcp import ToolProvider, load_server_specs
@@ -131,20 +132,24 @@ def _run(
         )
         elapsed = int((time.perf_counter() - began) * 1000)
 
-    output = result.structured_output
-    if not isinstance(output, CheckOutput):
-        errors.append(
-            ErrorInfo(
-                kind="validation",
-                message=(
-                    "the model ended the run without producing a structured answer "
-                    f"(stop reason: {result.stop_reason})"
-                ),
+        output = result.structured_output
+        if not isinstance(output, CheckOutput):
+            errors.append(
+                ErrorInfo(
+                    kind="validation",
+                    message=(
+                        "the model ended the run without producing a structured answer "
+                        f"(stop reason: {result.stop_reason})"
+                    ),
+                )
             )
-        )
-        output = CheckOutput()
-    else:
-        trace.record("output", name=check.output_model.__name__, duration_ms=elapsed)
+            output = CheckOutput()
+        else:
+            trace.record("output", name=check.output_model.__name__, duration_ms=elapsed)
+            # Inside the `with`, because a steering round is another model
+            # turn and the model may call a tool during it - which needs the
+            # servers still running.
+            output = _steer(agent, output, check, injection_guard, trace, errors)
 
     # The guards collected their own refusals while the loop ran.
     errors.extend(scope_guard.errors)
@@ -161,6 +166,58 @@ def _run(
         started_at=started,
         finished_at=datetime.now(UTC),
     )
+
+
+def _steer(
+    agent: Agent,
+    output: CheckOutput,
+    check: Check,
+    injection_guard: InjectionGuard,
+    trace: TraceCollector,
+    errors: list[ErrorInfo],
+) -> CheckOutput:
+    """Send the answer back while a rule is unmet, up to `MAX_ROUNDS`.
+
+    The corpus is the archived *raw* tool output, not what the model was
+    shown: grounding asks what the tools returned, and the wrapped copy
+    carries our framing around it. The guard keeps both for this reason.
+
+    An unmet rule that survives every round becomes a `validation` error
+    rather than being dropped. A run whose findings could not be grounded,
+    reported as a clean `issues_found`, is exactly the output this SDK
+    exists not to produce - and the status table turns the error into
+    `partial`, which is the honest word for "there is an answer and
+    something is wrong with it".
+
+    A round that fails to produce a structured answer keeps the previous
+    one. The model had a valid answer a moment ago, and losing it because a
+    revision went wrong would make steering more dangerous than the problem
+    it is addressing.
+    """
+    corpus = injection_guard.corpus()
+    issues = review(output, check, corpus)
+
+    for _round in range(MAX_ROUNDS):
+        if not issues:
+            return output
+        for issue in issues:
+            trace.record("steering", name=issue.rule, summary=issue.subject or issue.rule)
+
+        revised = agent(message_for(issues), limits={"turns": check.max_turns})
+        if not isinstance(revised.structured_output, CheckOutput):
+            break  # keep the answer we have
+        output = revised.structured_output
+        issues = review(output, check, injection_guard.corpus())
+
+    for issue in issues:
+        errors.append(
+            ErrorInfo(
+                kind="validation",
+                code=f"E_STEERING_{issue.rule.upper()}",
+                message=f"{issue.rule}: {issue.subject or issue.detail}",
+            )
+        )
+    return output
 
 
 def _failed(

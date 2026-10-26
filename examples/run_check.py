@@ -157,7 +157,11 @@ def report(result, *, trace: bool) -> None:
         print("  TRACE")
         for step in result.trace:
             took = f"  {step.duration_ms} ms" if step.duration_ms is not None else ""
-            print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}")
+            # The summary is the reason: which topic steering wanted, why a
+            # call was refused. A trace that shows a step fired without
+            # saying what over is a trace nobody can act on.
+            why = f"  {step.summary}" if step.summary and step.summary != step.name else ""
+            print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}{why}")
     print()
 
 
