@@ -47,4 +47,6 @@ def normalize_technologies(
         record.evidence_refs = sorted(set(record.evidence_refs + incoming.evidence_refs))
         if record.confidence.value == "UNKNOWN" or incoming.confidence.value == "HIGH":
             record.confidence = incoming.confidence
-    return sorted(merged.values(), key=lambda item: _key(item.category.value, item.name, item.version))
+    return sorted(
+        merged.values(), key=lambda item: _key(item.category.value, item.name, item.version)
+    )

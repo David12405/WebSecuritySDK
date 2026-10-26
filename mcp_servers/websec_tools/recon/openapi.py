@@ -368,7 +368,7 @@ def parse_api_document(document: Any, *, source_url: str) -> ApiSpecResult:
                     body = _resolve(body, document)
                 if isinstance(body, Mapping):
                     request_types = _content_types(body.get("content"))
-                    for content_type, media in (body.get("content") or {}).items():
+                    for _, media in (body.get("content") or {}).items():
                         if isinstance(media, Mapping):
                             body_fields.extend(_schema_fields(media.get("schema")))
             else:

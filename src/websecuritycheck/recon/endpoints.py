@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from urllib.parse import urlsplit, urlunsplit
 
 from websecuritycheck.domain import (
@@ -22,12 +23,12 @@ def normalize_origin(value: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return value.rstrip("/").lower()
     host = (parsed.hostname or "").rstrip(".").lower()
-    try:
+    with contextlib.suppress(UnicodeError):
         host = host.encode("idna").decode("ascii")
-    except UnicodeError:
-        pass
     port = parsed.port
-    default = (parsed.scheme.lower() == "http" and port == 80) or (parsed.scheme.lower() == "https" and port == 443)
+    default = (parsed.scheme.lower() == "http" and port == 80) or (
+        parsed.scheme.lower() == "https" and port == 443
+    )
     if ":" in host and not host.startswith("["):
         host = f"[{host}]"
     netloc = host if port is None or default else f"{host}:{port}"
@@ -67,7 +68,9 @@ def _parameter_key(parameter: ObservedParameter) -> tuple[str, str]:
     return parameter.location.value, name
 
 
-def _merge_parameters(existing: list[ObservedParameter], incoming: list[ObservedParameter]) -> list[ObservedParameter]:
+def _merge_parameters(
+    existing: list[ObservedParameter], incoming: list[ObservedParameter]
+) -> list[ObservedParameter]:
     merged: dict[tuple[str, str], ObservedParameter] = {
         _parameter_key(item): item.model_copy(deep=True) for item in existing
     }
@@ -100,7 +103,7 @@ def endpoint_from_observation(
     parameters = []
     for parameter in payload.parameters:
         enriched = parameter.model_copy(deep=True)
-        enriched.observation_refs = sorted(set(enriched.observation_refs + [observation.observation_id]))
+        enriched.observation_refs = sorted({*enriched.observation_refs, observation.observation_id})
         enriched.evidence_refs = sorted(set(enriched.evidence_refs + observation.evidence_refs))
         parameters.append(enriched)
     return EndpointDefinition(
@@ -108,8 +111,12 @@ def endpoint_from_observation(
         origin=normalize_origin(payload.origin),
         path=normalize_path(payload.path),
         method=normalize_method(payload.method),
-        request_content_types=sorted({item.lower().split(";", 1)[0].strip() for item in payload.request_content_types}),
-        response_content_types=sorted({item.lower().split(";", 1)[0].strip() for item in payload.response_content_types}),
+        request_content_types=sorted(
+            {item.lower().split(";", 1)[0].strip() for item in payload.request_content_types}
+        ),
+        response_content_types=sorted(
+            {item.lower().split(";", 1)[0].strip() for item in payload.response_content_types}
+        ),
         observed_parameters=_merge_parameters(parameters, []),
         declared_security=sorted(set(payload.declared_security)),
         discovery_sources=[_source(observation.source_type)],
@@ -118,14 +125,28 @@ def endpoint_from_observation(
     )
 
 
-def merge_endpoint(existing: EndpointDefinition, incoming: EndpointDefinition) -> EndpointDefinition:
-    if endpoint_key(existing.origin, existing.path, existing.method) != endpoint_key(incoming.origin, incoming.path, incoming.method):
+def merge_endpoint(
+    existing: EndpointDefinition, incoming: EndpointDefinition
+) -> EndpointDefinition:
+    if endpoint_key(existing.origin, existing.path, existing.method) != endpoint_key(
+        incoming.origin, incoming.path, incoming.method
+    ):
         raise ValueError("cannot merge endpoints with different identities")
-    existing.request_content_types = sorted(set(existing.request_content_types + incoming.request_content_types))
-    existing.response_content_types = sorted(set(existing.response_content_types + incoming.response_content_types))
-    existing.observed_parameters = _merge_parameters(existing.observed_parameters, incoming.observed_parameters)
-    existing.declared_security = sorted(set(existing.declared_security + incoming.declared_security))
-    existing.discovery_sources = sorted(set(existing.discovery_sources + incoming.discovery_sources), key=lambda item: item.value)
+    existing.request_content_types = sorted(
+        set(existing.request_content_types + incoming.request_content_types)
+    )
+    existing.response_content_types = sorted(
+        set(existing.response_content_types + incoming.response_content_types)
+    )
+    existing.observed_parameters = _merge_parameters(
+        existing.observed_parameters, incoming.observed_parameters
+    )
+    existing.declared_security = sorted(
+        set(existing.declared_security + incoming.declared_security)
+    )
+    existing.discovery_sources = sorted(
+        set(existing.discovery_sources + incoming.discovery_sources), key=lambda item: item.value
+    )
     existing.evidence_refs = sorted(set(existing.evidence_refs + incoming.evidence_refs))
     existing.observation_refs = sorted(set(existing.observation_refs + incoming.observation_refs))
     if existing.required_auth_role is None:
@@ -153,4 +174,6 @@ def normalize_endpoints(
             merge_endpoint(merged[key], incoming)
         else:
             merged[key] = incoming
-    return sorted(merged.values(), key=lambda item: endpoint_key(item.origin, item.path, item.method))
+    return sorted(
+        merged.values(), key=lambda item: endpoint_key(item.origin, item.path, item.method)
+    )

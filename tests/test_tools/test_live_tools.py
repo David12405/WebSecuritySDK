@@ -12,7 +12,6 @@ from mcp_servers.websec_tools import probes
 from mcp_servers.websec_tools.errors import ToolError
 from mcp_servers.websec_tools.recon import browser, nmap, openapi, whatweb, zap
 
-
 pytestmark = [
     pytest.mark.live_tools,
     pytest.mark.skipif(

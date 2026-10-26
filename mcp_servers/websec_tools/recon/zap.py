@@ -191,7 +191,11 @@ def parse_spider_urls(raw_urls: Any, *, target: str) -> list[CrawledEndpoint]:
     if not isinstance(raw_urls, list):
         return []
     values = raw_urls if isinstance(raw_urls, list) else []
-    endpoints = [item for value in values if (item := _endpoint_record(value)) is not None and _same_origin(item.url, origin)]
+    endpoints = [
+        item
+        for value in values
+        if (item := _endpoint_record(value)) is not None and _same_origin(item.url, origin)
+    ]
     deduped: dict[tuple[str, str | None], CrawledEndpoint] = {}
     for item in endpoints:
         deduped[(item.url, item.method)] = item
@@ -299,13 +303,20 @@ async def crawl_web(
     endpoints = parse_spider_urls(urls, target=target)
     truncated = len(endpoints) > MAX_ENDPOINTS
     raw_text = json.dumps(urls, sort_keys=True, separators=(",", ":"), default=str)
-    result = CrawlResult(target=target, completed=completed, endpoints=endpoints[:MAX_ENDPOINTS], artifact_manifests=[{
-        "artifact_ref": f"zap-crawl-{hashlib.sha256(raw_text.encode()).hexdigest()[:16]}",
-        "artifact_type": "WEB_SCAN_RESULT",
-        "content": raw_text,
-        "media_type": "application/json",
-        "redaction_applied": True,
-    }])
+    result = CrawlResult(
+        target=target,
+        completed=completed,
+        endpoints=endpoints[:MAX_ENDPOINTS],
+        artifact_manifests=[
+            {
+                "artifact_ref": f"zap-crawl-{hashlib.sha256(raw_text.encode()).hexdigest()[:16]}",
+                "artifact_type": "WEB_SCAN_RESULT",
+                "content": raw_text,
+                "media_type": "application/json",
+                "redaction_applied": True,
+            }
+        ],
+    )
     return envelope(
         f"ZAP discovered {len(result.endpoints)} endpoints on {target}",
         result.model_dump(mode="json"),

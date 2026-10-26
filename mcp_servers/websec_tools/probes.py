@@ -35,9 +35,7 @@ SECURITY_HEADERS = (
     "x-frame-options",
     "x-content-type-options",
 )
-SENSITIVE_HEADERS = frozenset(
-    {"set-cookie", "authorization", "proxy-authorization", "x-api-key"}
-)
+SENSITIVE_HEADERS = frozenset({"set-cookie", "authorization", "proxy-authorization", "x-api-key"})
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
@@ -94,7 +92,8 @@ def _redact_request_headers(headers: dict[str, str]) -> tuple[dict[str, str], li
     for name, value in headers.items():
         normalized = name.lower()
         if normalized in SENSITIVE_HEADERS or any(
-            part in normalized for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
+            part in normalized
+            for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
         ):
             output[normalized] = "<redacted>"
             redacted.append(normalized)
@@ -129,7 +128,15 @@ def _body_parameter_names(body: str | bytes | None, content_type: str | None) ->
     return []
 
 
-_SENSITIVE_BODY_KEYS = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
+_SENSITIVE_BODY_KEYS = (
+    "authorization",
+    "cookie",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+)
 
 
 def _redact_body_value(value: Any) -> Any:
@@ -267,7 +274,8 @@ def _header_map(response: httpx.Response) -> tuple[dict[str, str], bool]:
     for name, value in prioritized[:MAX_HEADERS]:
         normalized = name.lower()
         if normalized in SENSITIVE_HEADERS or any(
-            part in normalized for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
+            part in normalized
+            for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
         ):
             output[normalized] = "<redacted>"
             continue
@@ -331,7 +339,9 @@ async def _fetch(
             raise ProbeError("E_SCOPE", "redirect destination is outside the initial origin")
         chain.append({"from": current, "to": next_target, "status": response.status_code})
         current = next_target
-        if response.status_code == 303 or (response.status_code in {301, 302} and current_method == "POST"):
+        if response.status_code == 303 or (
+            response.status_code in {301, 302} and current_method == "POST"
+        ):
             current_method = "GET"
             current_body = None
     raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects")
@@ -363,9 +373,7 @@ async def get_response_headers(
             http_version=response.http_version,
             redirects=redirects,
             headers=headers,
-            redacted_headers=sorted(
-                name for name in SENSITIVE_HEADERS if name in response.headers
-            ),
+            redacted_headers=sorted(name for name in SENSITIVE_HEADERS if name in response.headers),
             security_headers_present=present,
             security_headers_missing=missing,
         )
@@ -398,7 +406,9 @@ async def probe_http(
         content_type = response.headers.get("content-type")
         body_bytes = response.content
         bounded = body_bytes[:MAX_VALUE_LENGTH]
-        body_text = _redact_body_text(bounded.decode("utf-8", errors="replace")) if bounded else None
+        body_text = (
+            _redact_body_text(bounded.decode("utf-8", errors="replace")) if bounded else None
+        )
         request_content_type = _header_value(headers or {}, "content-type")
         result = HTTPProbeResult(
             target=target,
@@ -415,16 +425,20 @@ async def probe_http(
             response_body_size=len(body_bytes),
             response_body_text=body_text,
             body_truncated=len(body_bytes) > len(bounded),
-            redacted_headers=redacted + [name for name in SENSITIVE_HEADERS if name in response.headers],
+            redacted_headers=redacted
+            + [name for name in SENSITIVE_HEADERS if name in response.headers],
         )
         exchange = json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        result.artifact_manifests = [{
-            "artifact_ref": f"http-exchange-{hashlib.sha256(exchange.encode()).hexdigest()[:16]}",
-            "artifact_type": "HTTP_RAW_EXCHANGE",
-            "content": exchange,
-            "media_type": "application/json",
-            "redaction_applied": True,
-        }]
+        artifact_ref = f"http-exchange-{hashlib.sha256(exchange.encode()).hexdigest()[:16]}"
+        result.artifact_manifests = [
+            {
+                "artifact_ref": artifact_ref,
+                "artifact_type": "HTTP_RAW_EXCHANGE",
+                "content": exchange,
+                "media_type": "application/json",
+                "redaction_applied": True,
+            }
+        ]
         return envelope(
             f"{method} {response.status_code} {response.url}",
             result.model_dump(mode="json", by_alias=True),

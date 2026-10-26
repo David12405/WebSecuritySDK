@@ -2,7 +2,6 @@
 
 from mcp_servers.websec_tools import server
 
-
 TOOL_COVERAGE = {
     "probe_http": "http",
     "get_response_headers": "http",
@@ -26,4 +25,11 @@ def test_every_registered_tool_has_declared_test_coverage():
 
 
 def test_tool_inventory_has_no_unclassified_entries():
-    assert set(TOOL_COVERAGE.values()) == {"http", "network", "zap", "whatweb", "openapi", "browser"}
+    assert set(TOOL_COVERAGE.values()) == {
+        "http",
+        "network",
+        "zap",
+        "whatweb",
+        "openapi",
+        "browser",
+    }

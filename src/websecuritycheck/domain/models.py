@@ -6,9 +6,10 @@ not contain vulnerability conclusions, orchestration state, or AI concepts.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import re
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StringConstraints, model_validator
 
 from .enums import (
@@ -22,10 +23,10 @@ from .enums import (
     InputLocation,
     ObservationSource,
     ObservationType,
+    TechnologyCategory,
     TestingMode,
     ToolExecutionStatus,
     ToolRiskClass,
-    TechnologyCategory,
 )
 
 Id = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2,}-[0-9]{3,}$")]

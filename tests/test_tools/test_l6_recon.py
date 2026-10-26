@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from mcp_servers.websec_tools import server
-from mcp_servers.websec_tools.recon import nmap, openapi, whatweb, zap
 from mcp_servers.websec_tools.errors import ToolError
+from mcp_servers.websec_tools.recon import nmap, openapi, whatweb, zap
 
 
 def async_test(function):

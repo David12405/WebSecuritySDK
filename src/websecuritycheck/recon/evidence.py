@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Iterable
 from typing import Any
+
 from websecuritycheck.domain import (
     ArtifactManifest,
     EvidenceArtifactRecord,
@@ -36,7 +37,15 @@ class RecordIdAllocator:
         return f"{prefix}-{number:03d}"
 
 
-_SENSITIVE_METADATA = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
+_SENSITIVE_METADATA = (
+    "authorization",
+    "cookie",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+)
 
 
 def _redact_metadata(value: Any) -> Any:
@@ -97,7 +106,9 @@ def create_evidence_records(
                 },
                 redaction_applied=manifest.redaction_applied,
                 truncated=manifest.truncated or execution.truncated,
-                metadata=_redact_metadata({**manifest.metadata, "result_type": execution.result_type}),
+                metadata=_redact_metadata(
+                    {**manifest.metadata, "result_type": execution.result_type}
+                ),
             )
         )
     return records

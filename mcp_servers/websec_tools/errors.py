@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 STABLE_ERROR_CODES = frozenset(
     {
         "E_INVALID_TARGET",

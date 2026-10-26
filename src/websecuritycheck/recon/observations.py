@@ -11,7 +11,6 @@ from websecuritycheck.domain import (
     BrowserBehaviorObservationPayload,
     EndpointObservationPayload,
     EvidenceArtifactRecord,
-    HttpExchangeObservationPayload,
     InputLocation,
     NetworkHostObservationPayload,
     NetworkServiceObservationPayload,
@@ -90,7 +89,9 @@ def _source(result_type: str) -> ObservationSource:
     return ObservationSource.HTTP_OBSERVATION
 
 
-def _http(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _http(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     data = _data(execution)
     url = str(data.get("url") or data.get("final_url") or execution.target or "")
     if not url:
@@ -103,7 +104,11 @@ def _http(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: li
     params = list(data.get("parameters") or [])
     if not params:
         params = _parameters_from_query(url, refs)
-    body_location = InputLocation.JSON_BODY if "json" in str(data.get("request_content_type") or "").lower() else InputLocation.FORM
+    body_location = (
+        InputLocation.JSON_BODY
+        if "json" in str(data.get("request_content_type") or "").lower()
+        else InputLocation.FORM
+    )
     params.extend(
         ObservedParameter(name=str(name), location=body_location, evidence_refs=refs)
         for name in data.get("request_parameter_names", [])
@@ -145,7 +150,11 @@ def _http(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: li
                 AuthenticationObservationPayload(
                     subject=url,
                     session_present=data.get("session_present"),
-                    cookie_names=[str(item.get("name")) for item in data.get("cookies", []) if isinstance(item, dict)],
+                    cookie_names=[
+                        str(item.get("name"))
+                        for item in data.get("cookies", [])
+                        if isinstance(item, dict)
+                    ],
                 ),
                 refs,
             )
@@ -153,7 +162,9 @@ def _http(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: li
     return result
 
 
-def _zap(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _zap(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     data = _data(execution)
     records: list[ObservationRecord] = []
     for index, endpoint in enumerate(data.get("endpoints") or data.get("messages") or []):
@@ -182,7 +193,9 @@ def _zap(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: lis
                     method=str(endpoint.get("method") or "GET").upper(),
                     parameters=parameters,
                     status=endpoint.get("status"),
-                    response_content_types=[str(endpoint["content_type"])] if endpoint.get("content_type") else [],
+                    response_content_types=[str(endpoint["content_type"])]
+                    if endpoint.get("content_type")
+                    else [],
                 ),
                 refs,
                 f"endpoints[{index}]",
@@ -191,7 +204,9 @@ def _zap(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: lis
     return records
 
 
-def _openapi(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _openapi(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     data = _data(execution)
     records: list[ObservationRecord] = []
     source_origin = data.get("source_origin")
@@ -233,11 +248,19 @@ def _openapi(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
         for body in operation.get("body_fields") or []:
             if isinstance(body, str):
                 body_location = InputLocation.JSON_BODY
-                if any("multipart" in str(item).lower() for item in operation.get("request_content_types", [])):
+                if any(
+                    "multipart" in str(item).lower()
+                    for item in operation.get("request_content_types", [])
+                ):
                     body_location = InputLocation.MULTIPART
-                elif any("form-urlencoded" in str(item).lower() for item in operation.get("request_content_types", [])):
+                elif any(
+                    "form-urlencoded" in str(item).lower()
+                    for item in operation.get("request_content_types", [])
+                ):
                     body_location = InputLocation.FORM
-                params.append(ObservedParameter(name=body, location=body_location, evidence_refs=refs))
+                params.append(
+                    ObservedParameter(name=body, location=body_location, evidence_refs=refs)
+                )
         records.append(
             _record(
                 execution,
@@ -247,10 +270,18 @@ def _openapi(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
                     origin=source_origin,
                     path=str(operation.get("path") or "/"),
                     method=str(operation.get("method") or "GET").upper(),
-                    request_content_types=[str(item) for item in operation.get("request_content_types", [])],
-                    response_content_types=[str(item) for item in operation.get("response_content_types", [])],
+                    request_content_types=[
+                        str(item) for item in operation.get("request_content_types", [])
+                    ],
+                    response_content_types=[
+                        str(item) for item in operation.get("response_content_types", [])
+                    ],
                     parameters=params,
-                    declared_security=[str(item.get("scheme_name")) for item in operation.get("security", []) if isinstance(item, dict)],
+                    declared_security=[
+                        str(item.get("scheme_name"))
+                        for item in operation.get("security", [])
+                        if isinstance(item, dict)
+                    ],
                 ),
                 refs,
                 f"operations[{index}]",
@@ -259,13 +290,17 @@ def _openapi(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
     return records
 
 
-def _whatweb(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _whatweb(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     records: list[ObservationRecord] = []
     for index, technology in enumerate(_data(execution).get("technologies") or []):
         if not isinstance(technology, dict):
             continue
         categories = technology.get("categories") or []
-        category = str(technology.get("category") or (categories[0] if categories else "OTHER")).upper()
+        category = str(
+            technology.get("category") or (categories[0] if categories else "OTHER")
+        ).upper()
         category_aliases = {
             "WEB SERVERS": "WEB_SERVER",
             "WEB SERVER": "WEB_SERVER",
@@ -289,7 +324,9 @@ def _whatweb(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
                 TechnologyObservationPayload(
                     name=str(technology.get("name") or "Unknown"),
                     category=category_value,
-                    version=(technology.get("version") or (technology.get("versions") or [None])[0]),
+                    version=(
+                        technology.get("version") or (technology.get("versions") or [None])[0]
+                    ),
                     confidence=str(technology.get("confidence") or "UNKNOWN").upper(),
                 ),
                 refs,
@@ -299,7 +336,9 @@ def _whatweb(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
     return records
 
 
-def _browser(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _browser(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     data = _data(execution)
     records: list[ObservationRecord] = []
     for index, event in enumerate(data.get("network_events") or []):
@@ -316,11 +355,17 @@ def _browser(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
                     origin=origin,
                     path=path,
                     method=str(event.get("method") or "GET").upper(),
-                    request_content_types=[str(event["request_content_type"])] if event.get("request_content_type") else [],
-                    response_content_types=[str(event["response_content_type"])] if event.get("response_content_type") else [],
+                    request_content_types=[str(event["request_content_type"])]
+                    if event.get("request_content_type")
+                    else [],
+                    response_content_types=[str(event["response_content_type"])]
+                    if event.get("response_content_type")
+                    else [],
                     status=event.get("response_status"),
                     parameters=[
-                        ObservedParameter(name=str(name), location=InputLocation.QUERY, evidence_refs=refs)
+                        ObservedParameter(
+                            name=str(name), location=InputLocation.QUERY, evidence_refs=refs
+                        )
                         for name in event.get("query_parameter_names", [])
                     ],
                 ),
@@ -339,7 +384,9 @@ def _browser(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
                         action_id=action.get("action_id"),
                         event=str(action.get("kind") or action.get("event") or "action"),
                         url=action.get("url"),
-                        related_network_event_ids=[str(item) for item in action.get("network_event_ids", [])],
+                        related_network_event_ids=[
+                            str(item) for item in action.get("network_event_ids", [])
+                        ],
                     ),
                     refs,
                     f"actions[{index}]",
@@ -348,21 +395,58 @@ def _browser(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs:
     return records
 
 
-def _nmap(execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]) -> list[ObservationRecord]:
+def _nmap(
+    execution: ToolExecutionResult, allocator: RecordIdAllocator, refs: list[str]
+) -> list[ObservationRecord]:
     data = _data(execution)
     records: list[ObservationRecord] = []
     for host_index, host in enumerate(data.get("hosts") or []):
         if not isinstance(host, dict):
             continue
         address = str(host.get("address") or "")
-        records.append(_record(execution, allocator, ObservationType.NETWORK_HOST, NetworkHostObservationPayload(address=address, hostnames=list(host.get("hostnames") or []), state=str(host.get("state") or "unknown")), refs, f"hosts[{host_index}]"))
+        records.append(
+            _record(
+                execution,
+                allocator,
+                ObservationType.NETWORK_HOST,
+                NetworkHostObservationPayload(
+                    address=address,
+                    hostnames=list(host.get("hostnames") or []),
+                    state=str(host.get("state") or "unknown"),
+                ),
+                refs,
+                f"hosts[{host_index}]",
+            )
+        )
         for service_index, service in enumerate(host.get("services") or []):
             if isinstance(service, dict):
-                records.append(_record(execution, allocator, ObservationType.NETWORK_SERVICE, NetworkServiceObservationPayload(address=address, port=int(service.get("port")), protocol=str(service.get("protocol") or "unknown"), state=str(service.get("state") or "unknown"), service=service.get("service"), product=service.get("product"), version=service.get("version")), refs, f"hosts[{host_index}].services[{service_index}]"))
+                records.append(
+                    _record(
+                        execution,
+                        allocator,
+                        ObservationType.NETWORK_SERVICE,
+                        NetworkServiceObservationPayload(
+                            address=address,
+                            port=int(service.get("port")),
+                            protocol=str(service.get("protocol") or "unknown"),
+                            state=str(service.get("state") or "unknown"),
+                            service=service.get("service"),
+                            product=service.get("product"),
+                            version=service.get("version"),
+                        ),
+                        refs,
+                        f"hosts[{host_index}].services[{service_index}]",
+                    )
+                )
     return records
 
 
-def extract_observations(execution: ToolExecutionResult, evidence: list[EvidenceArtifactRecord], *, allocator: RecordIdAllocator | None = None) -> list[ObservationRecord]:
+def extract_observations(
+    execution: ToolExecutionResult,
+    evidence: list[EvidenceArtifactRecord],
+    *,
+    allocator: RecordIdAllocator | None = None,
+) -> list[ObservationRecord]:
     allocator = allocator or RecordIdAllocator()
     refs = evidence_refs(evidence)
     result_type = execution.result_type.upper()

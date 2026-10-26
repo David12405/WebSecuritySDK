@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import ipaddress
 import os
@@ -109,10 +110,7 @@ def _address_type(value: str | None) -> str:
 def _text(element: ET.Element | None, attribute: str | None = None) -> str | None:
     if element is None:
         return None
-    if attribute is not None:
-        value = element.attrib.get(attribute)
-    else:
-        value = element.text
+    value = element.attrib.get(attribute) if attribute is not None else element.text
     if value is None:
         return None
     value = value.strip()
@@ -236,17 +234,13 @@ async def _default_runner(argv: list[str], timeout: float) -> tuple[int, bytes, 
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except TimeoutError as exc:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise ToolError("E_TIMEOUT", "Nmap execution timed out") from exc
     except asyncio.CancelledError:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise
     return process.returncode or 0, stdout, stderr

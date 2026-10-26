@@ -27,8 +27,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from mcp_servers.websec_tools import probes  # noqa: E402
-from mcp_servers.websec_tools.recon import nmap, openapi, whatweb, zap  # noqa: E402
 from mcp_servers.websec_tools.errors import ToolError, safe_message  # noqa: E402
+from mcp_servers.websec_tools.recon import nmap, openapi, whatweb, zap  # noqa: E402
 
 TOOL_ORDER = (
     "discover_hosts",
@@ -84,13 +84,9 @@ def _canonical_url(target: str) -> str:
     except UnicodeError as exc:
         raise ToolError("E_INVALID_TARGET", "target hostname is invalid") from exc
     port = parsed.port
-    if ":" in hostname:
-        host = f"[{hostname}]"
-    else:
-        host = hostname
+    host = f"[{hostname}]" if ":" in hostname else hostname
     if port is not None and not (
-        (parsed.scheme == "http" and port == 80)
-        or (parsed.scheme == "https" and port == 443)
+        (parsed.scheme == "http" and port == 80) or (parsed.scheme == "https" and port == 443)
     ):
         host = f"{host}:{port}"
     return urlunsplit((parsed.scheme.lower(), host, parsed.path or "/", parsed.query, ""))
@@ -287,9 +283,7 @@ async def _run_all(target: str) -> tuple[dict[str, Any], int]:
     calls = _tool_calls()
     results: dict[str, Any] = {}
     host_invocation = await _call_one(network_target, calls["discover_hosts"])
-    service_invocation = await _call_one(
-        network_target, calls["discover_services"]
-    )
+    service_invocation = await _call_one(network_target, calls["discover_services"])
     results["discover_hosts"] = _aggregate([host_invocation])
     results["discover_services"] = _aggregate([service_invocation])
 

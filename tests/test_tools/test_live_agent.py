@@ -6,7 +6,6 @@ import os
 
 import pytest
 
-
 pytestmark = [
     pytest.mark.live_agent,
     pytest.mark.skipif(
@@ -38,7 +37,11 @@ def test_registered_checks_return_structured_results_without_secret_leakage():
         for step in result.trace:
             if step.kind == "tool_call":
                 tool_step_ids.add(step.id)
-                assert step.name in checker.checks or step.name.startswith("get_") or step.name.endswith("_web")
+                assert (
+                    step.name in checker.checks
+                    or step.name.startswith("get_")
+                    or step.name.endswith("_web")
+                )
         for finding in result.findings:
             assert set(finding.tool_refs) <= tool_step_ids
         serialized = result.model_dump_json()

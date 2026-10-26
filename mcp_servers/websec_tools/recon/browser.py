@@ -81,7 +81,11 @@ class BrowserReconResult(BaseModel):
 
 def _origin(url: str) -> tuple[str, str, int]:
     parsed = urlsplit(url)
-    return parsed.scheme.lower(), (parsed.hostname or "").rstrip(".").lower(), parsed.port or (443 if parsed.scheme == "https" else 80)
+    return (
+        parsed.scheme.lower(),
+        (parsed.hostname or "").rstrip(".").lower(),
+        parsed.port or (443 if parsed.scheme == "https" else 80),
+    )
 
 
 def _same_origin(left: str, right: str) -> bool:
@@ -104,6 +108,7 @@ def _body_names(value: str | None, content_type: str | None) -> list[str]:
     if content_type and "json" in content_type.lower():
         try:
             import json
+
             parsed = json.loads(value)
         except (ValueError, TypeError):
             return []
@@ -163,13 +168,38 @@ async def explore_browser(
     async def route_handler(route: Any) -> None:
         request = route.request
         if not _same_origin(target, request.url):
-            events.append({"event_id": f"NET-{len(events) + 1:04d}", "url": request.url, "method": request.method, "resource_type": request.resource_type, "blocked": True, "blocked_reason": "out_of_scope", "action_id": current_action})
+            events.append(
+                {
+                    "event_id": f"NET-{len(events) + 1:04d}",
+                    "url": request.url,
+                    "method": request.method,
+                    "resource_type": request.resource_type,
+                    "blocked": True,
+                    "blocked_reason": "out_of_scope",
+                    "action_id": current_action,
+                }
+            )
             await route.abort()
             return
         headers = await request.all_headers()
         content_type = headers.get("content-type")
         query = urlsplit(request.url).query
-        events.append({"event_id": f"NET-{len(events) + 1:04d}", "url": request.url, "method": request.method, "resource_type": request.resource_type, "request_content_type": content_type, "query_parameter_names": sorted({part.split("=", 1)[0] for part in query.split("&") if part}), "request_body_field_names": _body_names(request.post_data, content_type), "redacted_headers": _header_names(headers), "blocked": False, "action_id": current_action})
+        events.append(
+            {
+                "event_id": f"NET-{len(events) + 1:04d}",
+                "url": request.url,
+                "method": request.method,
+                "resource_type": request.resource_type,
+                "request_content_type": content_type,
+                "query_parameter_names": sorted(
+                    {part.split("=", 1)[0] for part in query.split("&") if part}
+                ),
+                "request_body_field_names": _body_names(request.post_data, content_type),
+                "redacted_headers": _header_names(headers),
+                "blocked": False,
+                "action_id": current_action,
+            }
+        )
         await route.continue_()
 
     await page.route("**/*", route_handler)
@@ -194,7 +224,9 @@ async def explore_browser(
     page.on("response", response_handler)
     result_actions: list[BrowserActionResult] = []
     try:
-        await asyncio.wait_for(page.goto(target, wait_until="domcontentloaded"), timeout=timeout_seconds)
+        await asyncio.wait_for(
+            page.goto(target, wait_until="domcontentloaded"), timeout=timeout_seconds
+        )
         visited.append(page.url)
         for index, action in enumerate(requested_actions):
             kind = _action_kind(action)
@@ -205,7 +237,9 @@ async def explore_browser(
                 if kind == "navigate":
                     destination = urljoin(page.url, str(action.get("url") or ""))
                     if not _same_origin(target, destination):
-                        raise ToolError("E_SCOPE", "browser navigation is outside the initial origin")
+                        raise ToolError(
+                            "E_SCOPE", "browser navigation is outside the initial origin"
+                        )
                     await page.goto(destination, wait_until="domcontentloaded")
                 elif kind == "click":
                     await page.locator(selector).click()
@@ -216,19 +250,89 @@ async def explore_browser(
                 elif kind == "wait":
                     await page.locator(selector).wait_for(state="visible")
                 visited.append(page.url)
-                result_actions.append(BrowserActionResult(action_id=action_id, kind=kind, status="completed", url=page.url, network_event_ids=[item["event_id"] for item in events if item.get("action_id") == action_id]))
+                result_actions.append(
+                    BrowserActionResult(
+                        action_id=action_id,
+                        kind=kind,
+                        status="completed",
+                        url=page.url,
+                        network_event_ids=[
+                            item["event_id"]
+                            for item in events
+                            if item.get("action_id") == action_id
+                        ],
+                    )
+                )
             except ToolError:
                 raise
             except Exception as exc:
-                result_actions.append(BrowserActionResult(action_id=action_id, kind=kind, status="failed", url=page.url, error=str(exc)[:MAX_TEXT]))
-        forms = await page.locator("form").evaluate_all("""forms => forms.slice(0, 200).map(form => ({action: form.action || null, method: (form.method || 'GET').toUpperCase(), enctype: form.enctype || null, controls: Array.from(form.elements).slice(0, 100).map(control => ({name: control.name || null, type: control.type || null, required: !!control.required, disabled: !!control.disabled}))}))""")
-        result = BrowserReconResult(target=target, final_url=page.url, visited_urls=sorted(set(visited)), actions=result_actions, network_events=[BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]], forms=[BrowserForm.model_validate(item) for item in forms[:MAX_FORMS]], redirects=[BrowserRedirect.model_validate(item) for item in redirects], completed=True, warnings=warnings, truncated=len(events) > MAX_EVENTS)
-    except asyncio.TimeoutError:
-        result = BrowserReconResult(target=target, final_url=page.url, visited_urls=sorted(set(visited)), actions=result_actions, network_events=[BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]], forms=[], redirects=[], completed=False, errors=["E_TIMEOUT"], truncated=len(events) > MAX_EVENTS)
+                result_actions.append(
+                    BrowserActionResult(
+                        action_id=action_id,
+                        kind=kind,
+                        status="failed",
+                        url=page.url,
+                        error=str(exc)[:MAX_TEXT],
+                    )
+                )
+        forms = await page.locator("form").evaluate_all(
+            """forms => forms.slice(0, 200).map(form => ({
+                action: form.action || null,
+                method: (form.method || 'GET').toUpperCase(),
+                enctype: form.enctype || null,
+                controls: Array.from(form.elements).slice(0, 100).map(control => ({
+                    name: control.name || null,
+                    type: control.type || null,
+                    required: !!control.required,
+                    disabled: !!control.disabled
+                }))
+            }))"""
+        )
+        result = BrowserReconResult(
+            target=target,
+            final_url=page.url,
+            visited_urls=sorted(set(visited)),
+            actions=result_actions,
+            network_events=[
+                BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]
+            ],
+            forms=[BrowserForm.model_validate(item) for item in forms[:MAX_FORMS]],
+            redirects=[BrowserRedirect.model_validate(item) for item in redirects],
+            completed=True,
+            warnings=warnings,
+            truncated=len(events) > MAX_EVENTS,
+        )
+    except TimeoutError:
+        result = BrowserReconResult(
+            target=target,
+            final_url=page.url,
+            visited_urls=sorted(set(visited)),
+            actions=result_actions,
+            network_events=[
+                BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]
+            ],
+            forms=[],
+            redirects=[],
+            completed=False,
+            errors=["E_TIMEOUT"],
+            truncated=len(events) > MAX_EVENTS,
+        )
     except ToolError:
         raise
     except Exception as exc:
-        result = BrowserReconResult(target=target, final_url=page.url, visited_urls=sorted(set(visited)), actions=result_actions, network_events=[BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]], forms=[], redirects=[], completed=False, errors=[str(exc)[:MAX_TEXT]])
+        result = BrowserReconResult(
+            target=target,
+            final_url=page.url,
+            visited_urls=sorted(set(visited)),
+            actions=result_actions,
+            network_events=[
+                BrowserNetworkEvent.model_validate(item) for item in events[:MAX_EVENTS]
+            ],
+            forms=[],
+            redirects=[],
+            completed=False,
+            errors=[str(exc)[:MAX_TEXT]],
+        )
     finally:
         await context.close()
         await browser.close()
@@ -240,13 +344,22 @@ async def explore_browser(
         "form_count": len(result.forms),
         "redirect_count": len(result.redirects),
     }
-    trace_ref = f"browser-trace-{hashlib.sha256(json.dumps(trace_metadata, sort_keys=True).encode()).hexdigest()[:16]}"
-    result.artifact_manifests = [{
-        "artifact_ref": trace_ref,
-        "artifact_type": "BROWSER_TRACE",
-        "media_type": "application/json",
-        "redaction_applied": True,
-        "truncated": result.truncated,
-        "metadata": trace_metadata,
-    }]
-    return envelope(f"Browser explored {len(result.visited_urls)} URLs from {target}", result.model_dump(mode="json"), result.truncated)
+    trace_digest = hashlib.sha256(json.dumps(trace_metadata, sort_keys=True).encode()).hexdigest()[
+        :16
+    ]
+    trace_ref = f"browser-trace-{trace_digest}"
+    result.artifact_manifests = [
+        {
+            "artifact_ref": trace_ref,
+            "artifact_type": "BROWSER_TRACE",
+            "media_type": "application/json",
+            "redaction_applied": True,
+            "truncated": result.truncated,
+            "metadata": trace_metadata,
+        }
+    ]
+    return envelope(
+        f"Browser explored {len(result.visited_urls)} URLs from {target}",
+        result.model_dump(mode="json"),
+        result.truncated,
+    )

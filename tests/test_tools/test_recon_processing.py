@@ -52,9 +52,7 @@ def test_api_spec_source_does_not_become_runtime_source():
         result_type="ApiSpecResult",
         result_data={
             "data": {
-                "operations": [
-                    {"path": "/declared", "method": "POST", "request_content_types": []}
-                ]
+                "operations": [{"path": "/declared", "method": "POST", "request_content_types": []}]
             }
         },
         status=ToolExecutionStatus.COMPLETED,
@@ -88,17 +86,41 @@ def test_same_endpoint_different_query_values_merge_on_update():
         ),
         (
             "BROWSER_FLOW",
-            {"network_events": [{"url": "https://example.com/xhr", "method": "POST", "response_status": 201}], "actions": [{"kind": "click"}]},
+            {
+                "network_events": [
+                    {"url": "https://example.com/xhr", "method": "POST", "response_status": 201}
+                ],
+                "actions": [{"kind": "click"}],
+            },
             2,
         ),
         (
             "WHATWEB_FINGERPRINT",
-            {"technologies": [{"name": "nginx", "versions": ["1.25"], "categories": ["Web servers"], "confidence": "HIGH"}]},
+            {
+                "technologies": [
+                    {
+                        "name": "nginx",
+                        "versions": ["1.25"],
+                        "categories": ["Web servers"],
+                        "confidence": "HIGH",
+                    }
+                ]
+            },
             1,
         ),
         (
             "NMAP_SCAN",
-            {"hosts": [{"address": "10.0.0.10", "state": "up", "services": [{"port": 80, "protocol": "tcp", "state": "open", "service": "http"}]}]},
+            {
+                "hosts": [
+                    {
+                        "address": "10.0.0.10",
+                        "state": "up",
+                        "services": [
+                            {"port": 80, "protocol": "tcp", "state": "open", "service": "http"}
+                        ],
+                    }
+                ]
+            },
             2,
         ),
     ],
@@ -148,7 +170,12 @@ def test_artifact_manifest_rejects_physical_artifact_references():
 
 def test_api_spec_and_runtime_sources_derive_both_without_mutating_spec_provenance():
     declared = process_tool_result(
-        _execution({"source_origin": "https://example.com", "operations": [{"path": "/x", "method": "GET"}]}).model_copy(
+        _execution(
+            {
+                "source_origin": "https://example.com",
+                "operations": [{"path": "/x", "method": "GET"}],
+            }
+        ).model_copy(
             update={"result_type": "OPENAPI_SPEC", "target": "https://example.com/openapi.json"}
         )
     )
@@ -220,7 +247,9 @@ def test_nmap_processing_creates_hosts_and_services_without_endpoints():
                     {
                         "address": "10.0.0.10",
                         "state": "up",
-                        "services": [{"port": 80, "protocol": "tcp", "state": "open", "service": "http"}],
+                        "services": [
+                            {"port": 80, "protocol": "tcp", "state": "open", "service": "http"}
+                        ],
                     }
                 ]
             }

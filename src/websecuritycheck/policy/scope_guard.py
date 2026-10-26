@@ -159,7 +159,9 @@ def in_scope(
     if not parts.scheme:
         network_entries = [entry for entry in entries if entry.scheme == "network"]
         if not network_entries:
-            return ScopeDecision(False, f"target {_quote(raw_target)!r} has no HTTP(S) scheme", rule=1)
+            return ScopeDecision(
+                False, f"target {_quote(raw_target)!r} has no HTTP(S) scheme", rule=1
+            )
         try:
             target_network = ipaddress.ip_network(raw_target, strict=False)
         except ValueError:
@@ -171,7 +173,9 @@ def in_scope(
                 continue
             if target_network is not None and target_network.subnet_of(scope_network):
                 return ALLOWED
-        return ScopeDecision(False, f"network target {_quote(raw_target)!r} is not in scope", rule=2)
+        return ScopeDecision(
+            False, f"network target {_quote(raw_target)!r} is not in scope", rule=2
+        )
 
     # Rule 1. Decided here rather than left to the tool: the guard makes the
     # decision, so it must not depend on something else validating first.

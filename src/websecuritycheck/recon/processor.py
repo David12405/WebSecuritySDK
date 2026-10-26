@@ -28,24 +28,39 @@ def process_tool_result(
     if execution.status.value in {"PENDING", "RUNNING"}:
         raise ValueError("only completed or partial tool results can be processed")
     if execution.result_schema_version != "1.0":
-        raise ValueError(f"unsupported tool result schema version {execution.result_schema_version!r}")
+        raise ValueError(
+            f"unsupported tool result schema version {execution.result_schema_version!r}"
+        )
     if assessment is not None and assessment.assessment_id != execution.assessment_id:
         raise ValueError("execution assessment does not match the trusted assessment policy")
-    if current_target_model is not None and current_target_model.assessment_id != execution.assessment_id:
+    if (
+        current_target_model is not None
+        and current_target_model.assessment_id != execution.assessment_id
+    ):
         raise ValueError("execution assessment does not match the target model")
     if allocator is None:
         existing_ids: list[str] = []
         if current_target_model is not None:
             existing_ids.extend(item.endpoint_id for item in current_target_model.endpoints)
-            existing_ids.extend(ref for item in current_target_model.endpoints for ref in item.observation_refs)
-            existing_ids.extend(ref for item in current_target_model.endpoints for ref in item.evidence_refs)
-            existing_ids.extend(ref for item in current_target_model.technologies for ref in item.observation_refs)
-            existing_ids.extend(ref for item in current_target_model.technologies for ref in item.evidence_refs)
+            existing_ids.extend(
+                ref for item in current_target_model.endpoints for ref in item.observation_refs
+            )
+            existing_ids.extend(
+                ref for item in current_target_model.endpoints for ref in item.evidence_refs
+            )
+            existing_ids.extend(
+                ref for item in current_target_model.technologies for ref in item.observation_refs
+            )
+            existing_ids.extend(
+                ref for item in current_target_model.technologies for ref in item.evidence_refs
+            )
         allocator = RecordIdAllocator(existing_ids)
     if not execution.artifact_manifests:
         embedded = execution.result_data.get("artifact_manifests")
         if isinstance(embedded, list):
-            manifests = [ArtifactManifest.model_validate(item) for item in embedded if isinstance(item, dict)]
+            manifests = [
+                ArtifactManifest.model_validate(item) for item in embedded if isinstance(item, dict)
+            ]
             if manifests:
                 execution = execution.model_copy(update={"artifact_manifests": manifests})
     evidence = create_evidence_records(execution, allocator=allocator)

@@ -183,7 +183,10 @@ async def test_browser_actions_network_correlation_forms_redirects_and_redaction
     assert data["completed"] is True
     assert data["forms"][0]["controls"][0]["name"] == "password"
     assert data["redirects"][0]["to_url"] == "https://target.test/redirected"
-    assert any(item["blocked"] and item["blocked_reason"] == "out_of_scope" for item in data["network_events"])
+    assert any(
+        item["blocked"] and item["blocked_reason"] == "out_of_scope"
+        for item in data["network_events"]
+    )
     assert data["artifact_manifests"][0]["artifact_type"] == "BROWSER_TRACE"
     assert any(item["action_id"] == "ACT-001" for item in data["actions"])
 

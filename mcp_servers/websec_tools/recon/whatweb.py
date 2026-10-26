@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -142,17 +143,13 @@ async def _default_runner(argv: list[str], output_path: Path, timeout: float) ->
     try:
         _stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except TimeoutError as exc:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise ToolError("E_TIMEOUT", "WhatWeb execution timed out") from exc
     except asyncio.CancelledError:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise
     return process.returncode or 0

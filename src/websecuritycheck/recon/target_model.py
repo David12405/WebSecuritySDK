@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from websecuritycheck.domain import AssessmentConfig, EndpointDefinition, TargetModel, TechnologyRecord
+from websecuritycheck.domain import (
+    AssessmentConfig,
+    EndpointDefinition,
+    TargetModel,
+    TechnologyRecord,
+)
 
 from .endpoints import endpoint_key, merge_endpoint
 from .technology import normalize_technologies
@@ -45,10 +50,16 @@ def update_target_model(
             merge_endpoint(endpoint_map[key], incoming)
         else:
             endpoint_map[key] = incoming.model_copy(deep=True)
-    endpoints = sorted(endpoint_map.values(), key=lambda item: endpoint_key(item.origin, item.path, item.method))
+    endpoints = sorted(
+        endpoint_map.values(), key=lambda item: endpoint_key(item.origin, item.path, item.method)
+    )
     technologies = normalize_technologies(technology_updates or [], existing=current.technologies)
     next_assets = sorted(set(current.assets + (assets or [])))
-    changed = endpoints != current.endpoints or technologies != current.technologies or next_assets != current.assets
+    changed = (
+        endpoints != current.endpoints
+        or technologies != current.technologies
+        or next_assets != current.assets
+    )
     if not changed:
         return current, False
     updated = current.model_copy(deep=True)

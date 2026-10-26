@@ -302,7 +302,9 @@ async def test_probe_http_blocks_cross_origin_and_https_downgrade_redirects():
 
     async def cross_origin(request):
         calls.append(str(request.url))
-        return httpx.Response(302, headers={"location": "https://evil.example/next"}, request=request)
+        return httpx.Response(
+            302, headers={"location": "https://evil.example/next"}, request=request
+        )
 
     async with make_client(cross_origin) as client:
         with pytest.raises(probes.ProbeError, match="outside the initial origin") as error:
