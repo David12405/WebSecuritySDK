@@ -27,6 +27,8 @@ def process_tool_result(
 ) -> ReconProcessingResult:
     if execution.status.value in {"PENDING", "RUNNING"}:
         raise ValueError("only completed or partial tool results can be processed")
+    if execution.result_schema_version != "1.0":
+        raise ValueError(f"unsupported tool result schema version {execution.result_schema_version!r}")
     if assessment is not None and assessment.assessment_id != execution.assessment_id:
         raise ValueError("execution assessment does not match the trusted assessment policy")
     if current_target_model is not None and current_target_model.assessment_id != execution.assessment_id:

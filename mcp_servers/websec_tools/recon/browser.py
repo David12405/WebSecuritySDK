@@ -175,20 +175,20 @@ async def explore_browser(
     await page.route("**/*", route_handler)
 
     async def response_handler(response: Any) -> None:
+        headers = await response.all_headers()
+        if 300 <= response.status < 400 and headers.get("location"):
+            redirects.append(
+                {
+                    "from_url": response.url,
+                    "to_url": urljoin(response.url, headers["location"]),
+                    "status": response.status,
+                    "followed": True,
+                }
+            )
         for event in reversed(events):
             if event["url"] == response.url and event.get("response_status") is None:
-                headers = await response.all_headers()
                 event["response_status"] = response.status
                 event["response_content_type"] = headers.get("content-type")
-                if 300 <= response.status < 400 and headers.get("location"):
-                    redirects.append(
-                        {
-                            "from_url": response.url,
-                            "to_url": urljoin(response.url, headers["location"]),
-                            "status": response.status,
-                            "followed": True,
-                        }
-                    )
                 break
 
     page.on("response", response_handler)

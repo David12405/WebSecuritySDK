@@ -27,6 +27,10 @@ packages = ["src/websecuritycheck"]
 [tool.pytest.ini_options]
 pythonpath = ["src", ".", "tests"]
 testpaths = ["tests"]
+markers = [
+    "live_tools: opt-in tests against an authorized lab target",
+    "live_agent: opt-in tests requiring an Agent model and credentials",
+]
 
 [tool.ruff]
 line-length = 100
