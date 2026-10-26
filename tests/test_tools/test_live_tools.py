@@ -12,13 +12,14 @@ from mcp_servers.websec_tools import probes
 from mcp_servers.websec_tools.errors import ToolError
 from mcp_servers.websec_tools.recon import browser, nmap, openapi, whatweb, zap
 
-pytestmark = [
-    pytest.mark.live_tools,
-    pytest.mark.skipif(
-        not os.getenv("RUN_LIVE_TOOLS") or not os.getenv("WEBSEC_LIVE_HOST"),
-        reason="set RUN_LIVE_TOOLS=1 and WEBSEC_LIVE_HOST for lab tests",
-    ),
-]
+LIVE_TOOLS_REQUIRED = pytest.mark.skipif(
+    not os.getenv("RUN_LIVE_TOOLS") or not os.getenv("WEBSEC_LIVE_HOST"),
+    reason="set RUN_LIVE_TOOLS=1 and WEBSEC_LIVE_HOST for lab tests",
+)
+LIVE_NMAP_REQUIRED = pytest.mark.skipif(
+    not os.getenv("RUN_LIVE_NMAP") or not os.getenv("WEBSEC_LIVE_HOST"),
+    reason="set RUN_LIVE_NMAP=1 and WEBSEC_LIVE_HOST for live Nmap tests",
+)
 
 
 def async_test(function):
@@ -38,6 +39,8 @@ def _skip_unavailable(error: ToolError):
     raise error
 
 
+@pytest.mark.live_nmap
+@LIVE_NMAP_REQUIRED
 @async_test
 async def test_live_nmap_discovery_contract():
     try:
@@ -48,6 +51,8 @@ async def test_live_nmap_discovery_contract():
     assert result["data"]["target"] == os.environ["WEBSEC_LIVE_HOST"]
 
 
+@pytest.mark.live_tools
+@LIVE_TOOLS_REQUIRED
 @async_test
 async def test_live_http_and_technology_contract():
     target = os.environ.get("WEBSEC_LIVE_URL") or f"http://{os.environ['WEBSEC_LIVE_HOST']}/"
@@ -62,6 +67,8 @@ async def test_live_http_and_technology_contract():
     assert set(fingerprint) == {"summary", "data", "truncated"}
 
 
+@pytest.mark.live_tools
+@LIVE_TOOLS_REQUIRED
 @async_test
 async def test_live_zap_contract():
     target = os.environ.get("WEBSEC_LIVE_URL") or f"http://{os.environ['WEBSEC_LIVE_HOST']}/"
@@ -73,6 +80,8 @@ async def test_live_zap_contract():
     assert crawl["data"]["artifact_manifests"]
 
 
+@pytest.mark.live_tools
+@LIVE_TOOLS_REQUIRED
 @async_test
 async def test_live_browser_contract():
     target = os.environ.get("WEBSEC_LIVE_URL") or f"http://{os.environ['WEBSEC_LIVE_HOST']}/"
@@ -84,6 +93,8 @@ async def test_live_browser_contract():
     assert browser_result["data"]["artifact_manifests"]
 
 
+@pytest.mark.live_tools
+@LIVE_TOOLS_REQUIRED
 @async_test
 async def test_live_openapi_contract_or_expected_absence():
     target = os.environ.get("WEBSEC_LIVE_URL") or f"http://{os.environ['WEBSEC_LIVE_HOST']}/"
