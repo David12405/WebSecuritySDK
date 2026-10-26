@@ -145,7 +145,8 @@ def parse_nmap_xml(
             (item for item in addresses if item.attrib.get("addrtype") in {"ipv4", "ipv6"}),
             None,
         )
-        primary = primary or (addresses[0] if addresses else None)
+        if primary is None:
+            primary = addresses[0] if addresses else None
         address = _text(primary, "addr")
         if not address:
             continue

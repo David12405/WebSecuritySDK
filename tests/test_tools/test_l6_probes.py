@@ -308,7 +308,7 @@ async def test_probe_http_blocks_cross_origin_and_https_downgrade_redirects():
         with pytest.raises(probes.ProbeError, match="outside the initial origin") as error:
             await probes.probe_http("https://example.com", client=client)
     assert error.value.code == "E_SCOPE"
-    assert calls == ["https://example.com/"]
+    assert calls == ["https://example.com"]
 
     async def downgrade(request):
         return httpx.Response(302, headers={"location": "http://example.com/next"}, request=request)

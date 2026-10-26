@@ -103,6 +103,16 @@ def _redact_request_headers(headers: dict[str, str]) -> tuple[dict[str, str], li
     return output, sorted(set(redacted))
 
 
+def _header_value(headers: dict[str, str], name: str) -> str | None:
+    """Read caller-provided headers case-insensitively."""
+
+    wanted = name.casefold()
+    for key, value in headers.items():
+        if key.casefold() == wanted:
+            return value
+    return None
+
+
 def _body_parameter_names(body: str | bytes | None, content_type: str | None) -> list[str]:
     if body is None:
         return []
@@ -389,6 +399,7 @@ async def probe_http(
         body_bytes = response.content
         bounded = body_bytes[:MAX_VALUE_LENGTH]
         body_text = _redact_body_text(bounded.decode("utf-8", errors="replace")) if bounded else None
+        request_content_type = _header_value(headers or {}, "content-type")
         result = HTTPProbeResult(
             target=target,
             method=method,
@@ -398,9 +409,9 @@ async def probe_http(
             redirects=redirects,
             request_headers=request_headers,
             response_headers=response_headers,
-            request_content_type=(headers or {}).get("content-type"),
+            request_content_type=request_content_type,
             response_content_type=content_type,
-            request_parameter_names=_body_parameter_names(body, (headers or {}).get("content-type")),
+            request_parameter_names=_body_parameter_names(body, request_content_type),
             response_body_size=len(body_bytes),
             response_body_text=body_text,
             body_truncated=len(body_bytes) > len(bounded),
