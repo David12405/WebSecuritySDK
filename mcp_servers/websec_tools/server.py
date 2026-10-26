@@ -1,4 +1,4 @@
-"""Thin MCP transport for the ten Layer 6 security tools."""
+"""Thin MCP transport for the Layer 6 security tools."""
 
 from __future__ import annotations
 
@@ -41,6 +41,27 @@ async def get_response_headers(target: str) -> dict[str, Any]:
     """Return final URL, status, redirect chain and response security headers."""
 
     return await _invoke(probes.get_response_headers, target)
+
+
+async def probe_http(
+    target: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
+) -> dict[str, Any]:
+    """Collect one bounded, redacted HTTP exchange."""
+
+    return await _invoke(probes.probe_http, target, method, headers, body)
+
+
+async def explore_browser(
+    target: str,
+    actions: list[dict[str, Any]] | None = None,
+    auth_ref: str | None = None,
+) -> dict[str, Any]:
+    """Explore a target through bounded declarative browser actions."""
+
+    return await _invoke(recon_tools.browser.explore_browser, target, actions, auth_ref)
 
 
 async def get_cookies(target: str) -> dict[str, Any]:
@@ -102,6 +123,7 @@ async def parse_api_spec(target: str) -> dict[str, Any]:
 
 
 TOOLS = (
+    probe_http,
     get_response_headers,
     get_cookies,
     get_tls_info,
@@ -112,6 +134,7 @@ TOOLS = (
     passive_web_analysis,
     fingerprint_web,
     parse_api_spec,
+    explore_browser,
 )
 
 

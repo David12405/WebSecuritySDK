@@ -9,11 +9,13 @@ description = "A typed SDK for agentic web-security checks, built on Strands Age
 requires-python = ">=3.11"
 dependencies = [
     "strands-agents>=1.58",
+    "openai>=1.0",
     "mcp>=2.1",
     "httpx>=0.28",
     "cryptography>=46",
     "pydantic>=2.11",
     "pyyaml>=6",
+    "playwright>=1.40",
 ]
 
 [project.optional-dependencies]

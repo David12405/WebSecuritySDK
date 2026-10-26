@@ -186,8 +186,9 @@ async def test_zap_crawl_and_passive_are_stateless_and_safe():
     assert all("apikey" not in params or params["apikey"] == "" for _path, params in calls)
 
 
-def test_server_registers_all_ten_tools():
+def test_server_registers_all_l6_tools():
     assert [tool.__name__ for tool in server.TOOLS] == [
+        "probe_http",
         "get_response_headers",
         "get_cookies",
         "get_tls_info",
@@ -198,4 +199,5 @@ def test_server_registers_all_ten_tools():
         "passive_web_analysis",
         "fingerprint_web",
         "parse_api_spec",
+        "explore_browser",
     ]

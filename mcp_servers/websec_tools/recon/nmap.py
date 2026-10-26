@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import os
 import re
@@ -67,6 +68,7 @@ class NmapHostDiscoveryResult(BaseModel):
     target: str
     profile: Literal["host-discovery"]
     hosts: list[NmapHost] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class NmapServiceDiscoveryResult(BaseModel):
@@ -76,6 +78,7 @@ class NmapServiceDiscoveryResult(BaseModel):
     profile: Literal["service-top-100", "service-explicit-ports"]
     requested_ports: list[int] = Field(default_factory=list)
     hosts: list[NmapServiceHost] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _validate_target(target: str) -> ipaddress._BaseNetwork | ipaddress._BaseAddress | str:
@@ -301,6 +304,14 @@ async def _run_profile(
     if returncode != 0:
         raise ToolError("E_TOOL_FAILED", f"Nmap exited with code {returncode}")
     parsed = parse_nmap_xml(stdout, target=target, profile=profile, ports=normalized_ports)
+    artifact = {
+        "artifact_ref": f"nmap-xml-{hashlib.sha256(stdout).hexdigest()[:16]}",
+        "artifact_type": "NETWORK_SCAN_RESULT",
+        "content": stdout.decode("utf-8", errors="replace"),
+        "media_type": "application/xml",
+        "redaction_applied": True,
+    }
+    parsed = parsed.model_copy(update={"artifact_manifests": [artifact]})
     if isinstance(parsed, NmapHostDiscoveryResult):
         truncated = len(parsed.hosts) > MAX_HOSTS
         if truncated:

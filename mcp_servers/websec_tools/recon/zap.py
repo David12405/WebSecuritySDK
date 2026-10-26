@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import uuid
@@ -34,6 +36,9 @@ class CrawledEndpoint(BaseModel):
     path: str
     query_parameter_names: list[str] = Field(default_factory=list)
     method: str | None = None
+    status: int | None = None
+    content_type: str | None = None
+    body_parameter_names: list[str] = Field(default_factory=list)
     source: str = "zap_spider"
 
 
@@ -44,6 +49,7 @@ class CrawlResult(BaseModel):
     spider: str = "traditional"
     completed: bool
     endpoints: list[CrawledEndpoint] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PassiveSecuritySignal(BaseModel):
@@ -162,12 +168,34 @@ def _endpoint(url: str) -> CrawledEndpoint | None:
     )
 
 
+def _endpoint_record(value: Any) -> CrawledEndpoint | None:
+    if isinstance(value, str):
+        return _endpoint(value)
+    if not isinstance(value, dict) or not isinstance(value.get("url"), str):
+        return None
+    item = _endpoint(value["url"])
+    if item is None:
+        return None
+    item.method = str(value["method"]).upper() if value.get("method") else None
+    raw_status = value.get("status", value.get("response_status"))
+    item.status = int(raw_status) if isinstance(raw_status, int) else None
+    raw_content_type = value.get("content_type", value.get("response_content_type"))
+    item.content_type = str(raw_content_type) if raw_content_type else None
+    raw_body_names = value.get("body_parameter_names", value.get("form_parameter_names", []))
+    item.body_parameter_names = sorted(str(name) for name in raw_body_names if name)
+    return item
+
+
 def parse_spider_urls(raw_urls: Any, *, target: str) -> list[CrawledEndpoint]:
     origin = _origin(target)[0]
     if not isinstance(raw_urls, list):
         return []
-    urls = sorted({url for url in raw_urls if isinstance(url, str) and _same_origin(url, origin)})
-    return [item for url in urls if (item := _endpoint(url)) is not None]
+    values = raw_urls if isinstance(raw_urls, list) else []
+    endpoints = [item for value in values if (item := _endpoint_record(value)) is not None and _same_origin(item.url, origin)]
+    deduped: dict[tuple[str, str | None], CrawledEndpoint] = {}
+    for item in endpoints:
+        deduped[(item.url, item.method)] = item
+    return [deduped[key] for key in sorted(deduped)]
 
 
 def parse_passive_alerts(raw_alerts: Any, *, target: str) -> list[PassiveSecuritySignal]:
@@ -196,7 +224,7 @@ def parse_passive_alerts(raw_alerts: Any, *, target: str) -> list[PassiveSecurit
 
 
 def _context_regex(origin: str) -> str:
-    return re.escape(origin) + ".*"
+    return re.escape(origin) + r"(?:/|$).*"
 
 
 def _limited_text(value: Any, fallback: str | None = None) -> str | None:
@@ -223,7 +251,7 @@ async def _remove_context(client: _ZapClient, context_name: str) -> None:
         return
 
 
-async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[str], str]:
+async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[Any], str]:
     context_name = await _new_context(client, target)
     try:
         response = await client.get(
@@ -247,8 +275,7 @@ async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[str],
             await asyncio.sleep(ZAP_POLL_SECONDS)
         result = await client.get("/JSON/spider/view/results/", {"scanId": scan_id})
         raw_urls = result.get("results", [])
-        urls = [item.url for item in parse_spider_urls(raw_urls, target=target)]
-        return True, sorted(set(urls)), context_name
+        return True, raw_urls if isinstance(raw_urls, list) else [], context_name
     except BaseException:
         await _remove_context(client, context_name)
         raise
@@ -271,7 +298,14 @@ async def crawl_web(
         await _remove_context(client, context_name)
     endpoints = parse_spider_urls(urls, target=target)
     truncated = len(endpoints) > MAX_ENDPOINTS
-    result = CrawlResult(target=target, completed=completed, endpoints=endpoints[:MAX_ENDPOINTS])
+    raw_text = json.dumps(urls, sort_keys=True, separators=(",", ":"), default=str)
+    result = CrawlResult(target=target, completed=completed, endpoints=endpoints[:MAX_ENDPOINTS], artifact_manifests=[{
+        "artifact_ref": f"zap-crawl-{hashlib.sha256(raw_text.encode()).hexdigest()[:16]}",
+        "artifact_type": "WEB_SCAN_RESULT",
+        "content": raw_text,
+        "media_type": "application/json",
+        "redaction_applied": True,
+    }])
     return envelope(
         f"ZAP discovered {len(result.endpoints)} endpoints on {target}",
         result.model_dump(mode="json"),

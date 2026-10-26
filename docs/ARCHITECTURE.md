@@ -219,6 +219,7 @@ word after any framework prefix.
 | `E_TOOL_FAILED` | external tool exited unsuccessfully | yes |
 | `E_PARSE` | deterministic tool output could not be parsed | no |
 | `E_UNSUPPORTED_INPUT` | input format or feature is unsupported | no |
+| `E_SCOPE` | redirect or browser request is outside the authorized boundary | no |
 | `E_SERVER_UNAVAILABLE` | MCP server did not start (raised by the SDK) | yes |
 | `E_TOOL_MISSING` | a check declares a tool no server provides (SDK) | no |
 
@@ -232,10 +233,11 @@ traditional ZAP Spider, ZAP Passive Scan, WhatWeb and an OpenAPI parser. They
 do not perform active vulnerability scanning, fuzzing, exploitation or writes.
 
 L6 validates target syntax, tool arguments, subprocess argv, timeouts and
-output limits. Scope authorization, assessment policy, orchestration and
-evidence persistence belong to Layer 5 or a layer above. L6 returns
-tool-specific structured data; the upper layer maps it to evidence and
-observation schemas when needed.
+output limits. Scope authorization and assessment policy remain policy-layer
+concerns, while `src/websecuritycheck/recon/` deterministically maps validated
+L6 results into evidence, observations, canonical endpoints, technologies and
+TargetModel. This layer does not choose tools, call an LLM, or decide whether
+recon is complete.
 
 `examples/probe_target.py` is a direct Layer 6 manual-verification utility.
 It calls the Python implementations directly and bypasses the L5
@@ -252,6 +254,7 @@ synchronized with the Layer 5 MCP client.
 
 | Tool | Implementation | Semantic mapping |
 |---|---|---|
+| `probe_http` | HTTP | `HTTP_METADATA`, `ENDPOINT`, `EVIDENCE_CAPTURE` |
 | `get_response_headers` | HTTP | `HTTP_METADATA`, `SECURITY_CONTROL` |
 | `get_cookies` | HTTP | `AUTHENTICATION`, `SECURITY_CONTROL` |
 | `get_tls_info` | TLS | `SECURITY_CONTROL` |
@@ -262,6 +265,7 @@ synchronized with the Layer 5 MCP client.
 | `passive_web_analysis` | ZAP Passive Scan | `SECURITY_SIGNAL` |
 | `fingerprint_web` | WhatWeb | `TECHNOLOGY` |
 | `parse_api_spec` | Internal OpenAPI parser | `ENDPOINT` |
+| `explore_browser` | Playwright browser adapter | `ENDPOINT`, `BROWSER_BEHAVIOR`, `EVIDENCE_CAPTURE` |
 
 ### 5.6 Result schema
 
