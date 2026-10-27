@@ -1,0 +1,23 @@
+{
+  "name": "web-security-cloudflare-test-targets",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic Cloudflare-based test targets for Module 1 Scope & Reconnaissance validation",
+  "scripts": {
+    "dev:basic": "wrangler dev --config targets/basic/wrangler.jsonc",
+    "dev:api": "wrangler dev --config targets/api/wrangler.jsonc",
+    "dev:spa": "wrangler dev --config targets/spa/wrangler.jsonc",
+    "dev:all": "node scripts/dev-all.mjs",
+    "deploy:basic": "wrangler deploy --config targets/basic/wrangler.jsonc",
+    "deploy:api": "wrangler deploy --config targets/api/wrangler.jsonc",
+    "deploy:spa": "wrangler deploy --config targets/spa/wrangler.jsonc",
+    "test": "node --test integration-tests/",
+    "test:offline": "node --test integration-tests/ground-truth.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "wrangler": "^3.90.0"
+  }
+}

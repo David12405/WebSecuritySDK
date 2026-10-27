@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Recon Target — SPA</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 2rem; color: #222; }
+    h1 { color: #111; }
+    .card { border: 1px solid #ddd; padding: 1rem; margin-bottom: 0.75rem; border-radius: 6px; background: #fafafa; }
+    button { cursor: pointer; padding: 0.4rem 0.8rem; margin-right: 0.5rem; }
+    input { padding: 0.4rem; }
+  </style>
+</head>
+<body>
+  <h1>SPA Recon Target</h1>
+  <p>Single Page Application for testing browser/runtime discovery vs static crawling.</p>
+
+  <section id="search-section">
+    <h2>Search Products</h2>
+    <label for="search-input">Keyword:</label>
+    <input type="text" id="search-input" value="test" />
+    <button type="button" id="btn-search">Search</button>
+  </section>
+
+  <section id="categories-section">
+    <h2>Categories</h2>
+    <ul id="categories-list">
+      <li>Loading categories...</li>
+    </ul>
+  </section>
+
+  <section id="products-section">
+    <h2>Products</h2>
+    <div id="products-list">Loading products...</div>
+  </section>
+
+  <section id="details-section">
+    <h2>Selected Item Details</h2>
+    <div id="details-view">No item selected.</div>
+  </section>
+
+  <section id="cart-section">
+    <h2>Cart Status</h2>
+    <div id="cart-status">Cart is empty.</div>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>
