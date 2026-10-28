@@ -34,7 +34,7 @@ from ..memory.context import framework_tools_for
 from ..policy.injection_guard import InjectionGuard
 from ..policy.judge import judge
 from ..policy.scope_guard import ScopeGuard, in_scope
-from ..policy.steering import MAX_ROUNDS, SteeringIssue, message_for, review
+from ..policy.steering import MAX_ROUNDS, SteeringIssue, error_code, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
 from ..telemetry.trace import TraceCollector
 from ..tools.mcp import ToolProvider, load_server_specs
@@ -219,10 +219,15 @@ def _steer(
         for issue in issues:
             trace.record("steering", name=issue.rule, summary=issue.subject or issue.rule)
 
+        began = time.perf_counter()
         revised = agent(message_for(issues), limits={"turns": check.max_turns})
+        elapsed = int((time.perf_counter() - began) * 1000)
         if not isinstance(revised.structured_output, CheckOutput):
             break  # keep the answer we have
         output = revised.structured_output
+        # A revised answer is a new output step. Without it the trace shows
+        # the steering rounds but never when the answer actually changed.
+        trace.record("output", name=check.output_model.__name__, duration_ms=elapsed)
         issues = look(output)
 
     for issue in issues:
@@ -235,7 +240,7 @@ def _steer(
         errors.append(
             ErrorInfo(
                 kind="validation",
-                code=f"E_STEERING_{issue.rule.upper()}",
+                code=error_code(issue.rule),
                 message=f"{issue.rule}{where}: {issue.detail}",
             )
         )
