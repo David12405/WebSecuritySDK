@@ -25,14 +25,6 @@ from websecuritycheck.results.export import summary_line, write_json, write_sari
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-SEVERITY_MARK = {
-    "critical": "CRIT",
-    "high": "HIGH",
-    "medium": "MED ",
-    "low": "LOW ",
-    "info": "INFO",
-}
-
 
 def load_env(path: Path = REPO_ROOT / ".env") -> None:
     """Read `KEY=value` lines into the environment, without overwriting it.
@@ -68,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trace", default="summary", choices=["off", "summary", "full"], help="trace detail"
     )
+    parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="add the model-judged steering rule (costs a model call per round)",
+    )
     parser.add_argument("--json", dest="json_path", help="write the result as JSON")
     parser.add_argument("--sarif", dest="sarif_path", help="write the result as SARIF 2.1.0")
     return parser.parse_args()
@@ -83,6 +80,7 @@ def main() -> int:
             scope=args.scope or [args.target],
             allow_subdomains=args.subdomains,
             trace_level=args.trace,
+            use_judge=args.judge,
         )
     except ValueError as exc:  # a bad scope is the caller's mistake, not a crash
         print(f"error: {exc}", file=sys.stderr)
@@ -132,7 +130,7 @@ def report(result, *, trace: bool) -> None:
     print(f"{'=' * 78}\n{summary_line(result)}\n{'=' * 78}")
 
     for finding in result.findings:
-        print(f"  {SEVERITY_MARK[finding.severity]}  {finding.title}")
+        print(f"  * {finding.title}")
         print(f"        where      {finding.location}")
         print(f"        evidence   {finding.evidence[:300]}")
         print(f"        rests on   {', '.join(finding.tool_refs) or '-'}")
@@ -157,7 +155,11 @@ def report(result, *, trace: bool) -> None:
         print("  TRACE")
         for step in result.trace:
             took = f"  {step.duration_ms} ms" if step.duration_ms is not None else ""
-            print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}")
+            # The summary is the reason: which topic steering wanted, why a
+            # call was refused. A trace that shows a step fired without
+            # saying what over is a trace nobody can act on.
+            why = f"  {step.summary}" if step.summary and step.summary != step.name else ""
+            print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}{why}")
     print()
 
 
@@ -169,24 +171,18 @@ def overview(results) -> None:
     scan where a check failed has not covered the site, however clean the
     checks that did run came back.
     """
-    counts: dict[str, int] = {}
-    for result in results:
-        for finding in result.findings:
-            counts[finding.severity] = counts.get(finding.severity, 0) + 1
-
     failed = [r.check for r in results if r.status == "failed"]
     partial = [r.check for r in results if r.status == "partial"]
-    total = sum(counts.values())
+    total = sum(len(r.findings) for r in results)
 
     print(f"{'=' * 78}\nSCAN SUMMARY\n{'=' * 78}")
     for check in results:
         print(f"  {check.check:10} {check.status:13} {len(check.findings)} finding(s)")
     print()
-    if total:
-        order = ["critical", "high", "medium", "low", "info"]
-        print("  " + " | ".join(f"{counts[s]} {s}" for s in order if s in counts))
-    else:
-        print("  no findings")
+    # A count, not a severity breakdown. Findings carry no rating, so the
+    # only honest headline is how many there are - and ranking them is the
+    # reader's job, since they know what the target is for.
+    print(f"  {total} finding(s) in total" if total else "  no findings")
 
     if failed:
         print(f"\n  INCOMPLETE: {', '.join(failed)} could not run. The site is not fully checked.")

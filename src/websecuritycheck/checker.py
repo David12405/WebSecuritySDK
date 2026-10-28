@@ -37,6 +37,7 @@ class SecurityChecker:
         servers_config: str | Path | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
+        use_judge: bool = False,
     ) -> None:
         """Scope is required and is validated here.
 
@@ -54,6 +55,7 @@ class SecurityChecker:
             trace_level=trace_level,
             api_key=api_key,
             temperature=temperature,
+            use_judge=use_judge,
             **kwargs,
         )
 

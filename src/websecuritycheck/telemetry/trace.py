@@ -91,6 +91,18 @@ class TraceCollector:
     and reporting are different jobs; only the second one is configurable.
     """
 
+    tools_seen: set[str] = field(default_factory=set)
+    """Names of the tools that ran successfully, also before the filter.
+
+    Separate from `measured` because "did you call the tool the check needs"
+    is a different question from "did you measure anything", and a check
+    declaring two tools can satisfy the second while failing the first.
+
+    Recorded here rather than read back from `steps` for the reason above:
+    a rule that reads the filtered trace reports every tool missing under
+    `trace_level="off"`.
+    """
+
     # -- writing ---------------------------------------------------------
 
     def record(
@@ -178,6 +190,7 @@ class TraceCollector:
         text = _text_of(event.result) if failed else ""
         if not failed:
             self.measured += 1
+            self.tools_seen.add(name)
         self.record(
             "tool_call",
             name=name,

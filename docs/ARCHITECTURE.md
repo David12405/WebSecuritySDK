@@ -273,12 +273,12 @@ Implemented in `results/models.py`.
 
 ```python
 class FindingDraft(BaseModel):     # what the MODEL fills, extra="forbid"
-    title: str
-    severity: Literal["info", "low", "medium", "high", "critical"]
+    title: str           # what is wrong AND what it exposes, in one line
     location: str        # URL, header name, cookie name ...
     evidence: str        # quoted from a tool result in THIS run
     source_tool: str     # which tool the evidence came from, "" if unattributed
                          # no `remediation`: this SDK reports, it does not advise
+                         # no `severity`:    one response cannot rate a risk
 
 class Finding(FindingDraft):       # what the DEVELOPER gets
     id: str              # stable across runs, so runs can be diffed

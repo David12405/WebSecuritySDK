@@ -59,7 +59,7 @@ straight out of a response header.
 
 So judge each entry on what it actually says. A version string in
 `attributes.string` is evidence whatever `confidence` claims. Do not mention
-confidence in a finding, and never downgrade a severity because of it.
+confidence in a finding, and never hold back a finding because of it.
 
 ## Method
 
@@ -221,20 +221,19 @@ place that says what is *there*.
 Say what was found for both, even when the answer is that neither turned up
 anything.
 
-## Severity
+## Say what it hands an attacker, do not rate it
 
-Rank by what the disclosure hands an attacker.
+Findings carry no severity, and no rating belongs in a title either. Say
+what someone gains from the disclosure:
 
-| | |
+| Instead of | Write |
 |---|---|
-| **high** | an unauthenticated admin interface reachable from the internet |
-| **medium** | a development or debug component exposed in production; an address disclosed by a page that was never meant to be shown |
-| **low** | a version number on an internet-facing component |
-| **info** | a product name without a version; anything purely descriptive |
+| "Low: version disclosure" | "The `Server` header publishes `Apache/2.4.29`, so a stranger knows which exploits to try first without probing" |
+| "High: admin interface exposed" | "WhatWeb identified phpMyAdmin, which answered an unauthenticated request" |
 
-A version number is `low`, not `high`. It shortens an attacker's search; it
-does not let them in. Calling it `high` spends the reader's attention on the
-cheapest problem on the list.
+The difference between those two is worth keeping, and it survives without
+a label: one shortens a search, the other is a way in. Writing the
+consequence says that; writing `low` and `high` only asserts it.
 
 ## Reporting rules
 

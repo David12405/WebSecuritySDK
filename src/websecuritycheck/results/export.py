@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
-from .models import CheckResult, ErrorInfo, Finding, Severity, TraceStep
+from .models import CheckResult, ErrorInfo, Finding, TraceStep
 
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -42,26 +42,15 @@ SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 TOOL_NAME = "WebSecurityCheck"
 TOOL_URI = "https://github.com/David12405/WebSecuritySDK"
 
-#: SARIF has four levels and we have five severities, so `critical` and
-#: `high` share `error`. The distinction survives in `security-severity`.
-SARIF_LEVEL: dict[Severity, str] = {
-    "critical": "error",
-    "high": "error",
-    "medium": "warning",
-    "low": "note",
-    "info": "note",
-}
-
-#: GitHub code scanning buckets this number: >=9.0 critical, >=7.0 high,
-#: >=4.0 medium, >0 low. There is no informational bucket, so `info` lands at
-#: the bottom of low rather than disappearing.
-SECURITY_SEVERITY: dict[Severity, str] = {
-    "critical": "9.0",
-    "high": "7.0",
-    "medium": "5.0",
-    "low": "3.0",
-    "info": "1.0",
-}
+#: Every finding is reported at this SARIF level, because findings carry no
+#: severity - see `results/models`. `warning` is SARIF's own default for a
+#: result whose rule says nothing, so this states what would happen anyway.
+#:
+#: The cost is real and belongs written down: GitHub code scanning ranks
+#: alerts by the `security-severity` property, and without it every alert
+#: sorts together. A reader gets the full list and does the triage, which is
+#: the honest trade for not having guessed the numbers.
+SARIF_LEVEL = "warning"
 
 #: Namespaced so GitHub can tell our fingerprints from another tool's, and
 #: versioned so changing how `stable_id` is derived does not silently merge
@@ -170,11 +159,10 @@ def _rules(findings: Sequence[Finding], check: str) -> list[dict[str, Any]]:
             # No `help`. SARIF viewers render it as the recommendation panel,
             # and this SDK reports what a target does without advising how to
             # change it. An empty panel is better than a guessed one.
-            "defaultConfiguration": {"level": SARIF_LEVEL[finding.severity]},
-            "properties": {
-                "security-severity": SECURITY_SEVERITY[finding.severity],
-                "tags": ["security", f"web/{check}"],
-            },
+            "defaultConfiguration": {"level": SARIF_LEVEL},
+            # No `security-severity`. GitHub ranks by it, and a number here
+            # would be one this SDK made up - see `SARIF_LEVEL`.
+            "properties": {"tags": ["security", f"web/{check}"]},
         }
     return list(seen.values())
 
@@ -182,7 +170,7 @@ def _rules(findings: Sequence[Finding], check: str) -> list[dict[str, Any]]:
 def _result(finding: Finding, target: str) -> dict[str, Any]:
     return {
         "ruleId": finding.id,
-        "level": SARIF_LEVEL[finding.severity],
+        "level": SARIF_LEVEL,
         "message": {"text": f"{finding.title} — {finding.evidence}"},
         "locations": [
             {
@@ -200,7 +188,6 @@ def _result(finding: Finding, target: str) -> dict[str, Any]:
         # `RunDiff`, handed to a tool that keeps its own history.
         "partialFingerprints": {FINGERPRINT_KEY: finding.id},
         "properties": {
-            "severity": finding.severity,
             "evidence": finding.evidence,
             "toolRefs": finding.tool_refs,
         },

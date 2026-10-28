@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from strands import Agent
@@ -31,7 +32,9 @@ from ..checks.base import Check
 from ..config import Settings
 from ..memory.context import framework_tools_for
 from ..policy.injection_guard import InjectionGuard
+from ..policy.judge import judge
 from ..policy.scope_guard import ScopeGuard, in_scope
+from ..policy.steering import MAX_ROUNDS, SteeringIssue, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
 from ..telemetry.trace import TraceCollector
 from ..tools.mcp import ToolProvider, load_server_specs
@@ -113,10 +116,15 @@ def _run(
 
         trace.record("skill_loaded", name=check.skill_name, summary=f"{check.skill_name}/SKILL.md")
 
+        # Built once and shared with the judge: same provider, same
+        # credentials, and a second build would be a second place for a
+        # model string to be read differently.
+        model = build_model(
+            settings.model, api_key=settings.api_key, temperature=settings.temperature
+        )
+
         agent = Agent(
-            model=build_model(
-                settings.model, api_key=settings.api_key, temperature=settings.temperature
-            ),
+            model=model,
             tools=tools,
             system_prompt=system_prompt(check),
             structured_output_model=check.output_model,
@@ -131,20 +139,24 @@ def _run(
         )
         elapsed = int((time.perf_counter() - began) * 1000)
 
-    output = result.structured_output
-    if not isinstance(output, CheckOutput):
-        errors.append(
-            ErrorInfo(
-                kind="validation",
-                message=(
-                    "the model ended the run without producing a structured answer "
-                    f"(stop reason: {result.stop_reason})"
-                ),
+        output = result.structured_output
+        if not isinstance(output, CheckOutput):
+            errors.append(
+                ErrorInfo(
+                    kind="validation",
+                    message=(
+                        "the model ended the run without producing a structured answer "
+                        f"(stop reason: {result.stop_reason})"
+                    ),
+                )
             )
-        )
-        output = CheckOutput()
-    else:
-        trace.record("output", name=check.output_model.__name__, duration_ms=elapsed)
+            output = CheckOutput()
+        else:
+            trace.record("output", name=check.output_model.__name__, duration_ms=elapsed)
+            # Inside the `with`, because a steering round is another model
+            # turn and the model may call a tool during it - which needs the
+            # servers still running.
+            output = _steer(agent, output, check, injection_guard, trace, errors, settings, model)
 
     # The guards collected their own refusals while the loop ran.
     errors.extend(scope_guard.errors)
@@ -161,6 +173,73 @@ def _run(
         started_at=started,
         finished_at=datetime.now(UTC),
     )
+
+
+def _steer(
+    agent: Agent,
+    output: CheckOutput,
+    check: Check,
+    injection_guard: InjectionGuard,
+    trace: TraceCollector,
+    errors: list[ErrorInfo],
+    settings: Settings,
+    model: Any,
+) -> CheckOutput:
+    """Send the answer back while a rule is unmet, up to `MAX_ROUNDS`.
+
+    The corpus is the archived *raw* tool output, not what the model was
+    shown: grounding asks what the tools returned, and the wrapped copy
+    carries our framing around it. The guard keeps both for this reason.
+
+    An unmet rule that survives every round becomes a `validation` error
+    rather than being dropped. A run whose findings could not be grounded,
+    reported as a clean `issues_found`, is exactly the output this SDK
+    exists not to produce - and the status table turns the error into
+    `partial`, which is the honest word for "there is an answer and
+    something is wrong with it".
+
+    A round that fails to produce a structured answer keeps the previous
+    one. The model had a valid answer a moment ago, and losing it because a
+    revision went wrong would make steering more dangerous than the problem
+    it is addressing.
+    """
+
+    def look(answer: CheckOutput) -> list[SteeringIssue]:
+        corpus = injection_guard.corpus()
+        verdicts = (
+            judge(check, answer, corpus, injection_guard.nonce, model) if settings.use_judge else []
+        )
+        return review(answer, check, corpus, tools_seen=trace.tools_seen, judged=verdicts)
+
+    issues = look(output)
+
+    for _round in range(MAX_ROUNDS):
+        if not issues:
+            return output
+        for issue in issues:
+            trace.record("steering", name=issue.rule, summary=issue.subject or issue.rule)
+
+        revised = agent(message_for(issues), limits={"turns": check.max_turns})
+        if not isinstance(revised.structured_output, CheckOutput):
+            break  # keep the answer we have
+        output = revised.structured_output
+        issues = look(output)
+
+    for issue in issues:
+        # The detail, not just the subject. A reader looking at a `partial`
+        # has to be able to tell a real objection from a reviewer being
+        # fussy, and "judge:follows: Missing X-Frame-Options header" tells
+        # them which finding and nothing about what is supposedly wrong
+        # with it.
+        where = f" ({issue.subject})" if issue.subject else ""
+        errors.append(
+            ErrorInfo(
+                kind="validation",
+                code=f"E_STEERING_{issue.rule.upper()}",
+                message=f"{issue.rule}{where}: {issue.detail}",
+            )
+        )
+    return output
 
 
 def _failed(
