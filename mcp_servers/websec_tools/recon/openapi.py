@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -51,6 +52,7 @@ class ApiParameter(BaseModel):
     location: str
     required: bool = False
     schema_type: str | None = None
+    content_type: str | None = None
 
 
 class ApiResponse(BaseModel):
@@ -76,6 +78,7 @@ class ApiOperation(BaseModel):
     summary: str | None = None
     parameters: list[ApiParameter] = Field(default_factory=list)
     request_content_types: list[str] = Field(default_factory=list)
+    body_fields: list[str] = Field(default_factory=list)
     responses: list[ApiResponse] = Field(default_factory=list)
     security: list[ApiSecurityRequirement] = Field(default_factory=list)
 
@@ -89,6 +92,7 @@ class ApiSpecResult(BaseModel):
     servers: list[ApiServer] = Field(default_factory=list)
     security_schemes: list[SecurityScheme] = Field(default_factory=list)
     operations: list[ApiOperation] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _as_string(value: Any) -> str | None:
@@ -154,6 +158,24 @@ def _schema_type(parameter: Mapping[str, Any]) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _schema_fields(schema: Any, prefix: str = "") -> list[str]:
+    if not isinstance(schema, Mapping):
+        return []
+    fields: list[str] = []
+    properties = schema.get("properties")
+    if isinstance(properties, Mapping):
+        for name, child in properties.items():
+            if not isinstance(name, str):
+                continue
+            path = f"{prefix}.{name}" if prefix else name
+            fields.append(path)
+            fields.extend(_schema_fields(child, path))
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        fields.extend(_schema_fields(items, f"{prefix}[]" if prefix else "[]"))
+    return sorted(set(fields))
+
+
 def _parameters(values: Any, document: Mapping[str, Any]) -> list[ApiParameter]:
     output: list[ApiParameter] = []
     if not isinstance(values, list):
@@ -172,6 +194,11 @@ def _parameters(values: Any, document: Mapping[str, Any]) -> list[ApiParameter]:
                 location=location,
                 required=bool(parameter.get("required", False)),
                 schema_type=_schema_type(parameter),
+                content_type=(
+                    next(iter(parameter.get("content", {})), None)
+                    if isinstance(parameter.get("content"), Mapping)
+                    else None
+                ),
             )
         )
     return sorted(output, key=lambda item: (item.location, item.name))
@@ -334,14 +361,22 @@ def parse_api_document(document: Any, *, source_url: str) -> ApiSpecResult:
                 operation_parameters = []
             params = _parameters([*path_parameters, *operation_parameters], document)
             request_types: list[str] = []
+            body_fields: list[str] = []
             if family == "openapi":
                 body = operation.get("requestBody")
                 if body is not None:
                     body = _resolve(body, document)
                 if isinstance(body, Mapping):
                     request_types = _content_types(body.get("content"))
+                    for _, media in (body.get("content") or {}).items():
+                        if isinstance(media, Mapping):
+                            body_fields.extend(_schema_fields(media.get("schema")))
             else:
                 request_types = _strings(operation.get("consumes", document.get("consumes", [])))
+                for raw_parameter in [*path_parameters, *operation_parameters]:
+                    parameter = _resolve(raw_parameter, document)
+                    if isinstance(parameter, Mapping) and parameter.get("in") == "body":
+                        body_fields.extend(_schema_fields(parameter.get("schema")))
             response_types = (
                 _strings(operation.get("produces", document.get("produces", [])))
                 if family == "swagger"
@@ -357,6 +392,7 @@ def parse_api_document(document: Any, *, source_url: str) -> ApiSpecResult:
                     summary=_as_string(operation.get("summary")),
                     parameters=params,
                     request_content_types=request_types,
+                    body_fields=sorted(set(body_fields)),
                     responses=responses,
                     security=security,
                 )
@@ -388,6 +424,13 @@ async def parse_api_spec(
         if response.status_code < 200 or response.status_code >= 300:
             raise ToolError("E_HTTP", f"OpenAPI fetch returned HTTP {response.status_code}")
         result = parse_api_document(response.content, source_url=str(response.url))
+        result.artifact_manifests = [{
+            "artifact_ref": f"openapi-document-{hashlib.sha256(response.content).hexdigest()[:16]}",
+            "artifact_type": "TOOL_RAW_OUTPUT",
+            "content": response.content.decode("utf-8", errors="replace"),
+            "media_type": response.headers.get("content-type", "application/octet-stream"),
+            "redaction_applied": False,
+        }]
     finally:
         if owned:
             await http.aclose()

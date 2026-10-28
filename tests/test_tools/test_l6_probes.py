@@ -244,3 +244,96 @@ async def test_mcp_wrappers_keep_probe_errors_stable(monkeypatch):
     monkeypatch.setattr(server.probes, "get_response_headers", fail)
     with pytest.raises(_mcp_tool_error_type(), match=r"^E_TIMEOUT:"):
         await server.get_response_headers("https://example.com")
+
+
+@pytest.mark.parametrize(
+    "wrapper_name,probe_name",
+    [
+        ("probe_http", "probe_http"),
+        ("get_response_headers", "get_response_headers"),
+        ("get_cookies", "get_cookies"),
+        ("get_tls_info", "get_tls_info"),
+        ("get_cors_policy", "get_cors_policy"),
+    ],
+)
+@async_test
+async def test_all_http_mcp_wrappers_preserve_error_codes(monkeypatch, wrapper_name, probe_name):
+    async def fail(*_args, **_kwargs):
+        raise probes.ProbeError("E_TIMEOUT", "timed out")
+
+    monkeypatch.setattr(server.probes, probe_name, fail)
+    with pytest.raises(_mcp_tool_error_type(), match=r"^E_TIMEOUT:"):
+        await getattr(server, wrapper_name)("https://example.com")
+
+
+@async_test
+async def test_probe_http_preserves_exchange_facts_and_redacts_secrets():
+    async def handler(request):
+        assert request.method == "POST"
+        assert request.content == b'{"user.id":"7","password":"secret"}'
+        return httpx.Response(
+            201,
+            headers={"content-type": "application/json", "set-cookie": "sid=secret-cookie"},
+            json={"user.id": "7", "password": "response-secret"},
+            request=request,
+        )
+
+    async with make_client(handler) as client:
+        result = await probes.probe_http(
+            "https://example.com/api/users",
+            method="POST",
+            headers={"Content-Type": "application/json", "Authorization": "Bearer secret-token"},
+            body='{"user.id":"7","password":"secret"}',
+            client=client,
+        )
+
+    serialized = json.dumps(result)
+    assert "secret-token" not in serialized
+    assert "response-secret" not in serialized
+    assert "secret-cookie" not in serialized
+    assert result["data"]["status"] == 201
+    assert result["data"]["request_parameter_names"] == ["password", "user.id"]
+    assert result["data"]["artifact_manifests"][0]["artifact_type"] == "HTTP_RAW_EXCHANGE"
+
+
+@async_test
+async def test_probe_http_blocks_cross_origin_and_https_downgrade_redirects():
+    calls = []
+
+    async def cross_origin(request):
+        calls.append(str(request.url))
+        return httpx.Response(
+            302, headers={"location": "https://evil.example/next"}, request=request
+        )
+
+    async with make_client(cross_origin) as client:
+        with pytest.raises(probes.ProbeError, match="outside the initial origin") as error:
+            await probes.probe_http("https://example.com", client=client)
+    assert error.value.code == "E_SCOPE"
+    assert calls == ["https://example.com"]
+
+    async def downgrade(request):
+        return httpx.Response(302, headers={"location": "http://example.com/next"}, request=request)
+
+    async with make_client(downgrade) as client:
+        with pytest.raises(probes.ProbeError, match="downgrade") as error:
+            await probes.probe_http("https://example.com", client=client)
+    assert error.value.code == "E_SCOPE"
+
+
+@async_test
+async def test_probe_http_rejects_unsupported_method_before_request():
+    async def handler(_request):
+        raise AssertionError("the transport must not be called")
+
+    async with make_client(handler) as client:
+        with pytest.raises(probes.ProbeError) as error:
+            await probes.probe_http("https://example.com", method="TRACE", client=client)
+    assert error.value.code == "E_INVALID_ARGUMENT"
+
+
+@async_test
+async def test_tls_probe_rejects_http_and_preserves_stable_code():
+    with pytest.raises(probes.ProbeError) as error:
+        await probes.get_tls_info("http://example.com")
+    assert error.value.code == "E_TLS"

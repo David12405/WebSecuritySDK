@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hashlib
 import json
 import os
 import tempfile
@@ -48,6 +50,7 @@ class WebFingerprintResult(BaseModel):
 
     target: str
     technologies: list[TechnologyFingerprint] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _as_strings(value: Any) -> list[str]:
@@ -58,7 +61,9 @@ def _as_strings(value: Any) -> list[str]:
 
 
 def _confidence(certainty: int | None) -> str:
-    if certainty is None or not 0 <= certainty <= 100:
+    if certainty is None:
+        return "HIGH"
+    if not 0 <= certainty <= 100:
         return "UNKNOWN"
     if certainty < 40:
         return "LOW"
@@ -92,7 +97,7 @@ def parse_whatweb_json(raw: bytes, *, target: str) -> WebFingerprintResult:
         certainty = (
             raw_certainty
             if isinstance(raw_certainty, int) and not isinstance(raw_certainty, bool)
-            else None
+            else 100
         )
         attributes: list[TechnologyAttribute] = []
         for attribute_name in sorted(details):
@@ -111,7 +116,17 @@ def parse_whatweb_json(raw: bytes, *, target: str) -> WebFingerprintResult:
                 attributes=attributes,
             )
         )
-    return WebFingerprintResult(target=target, technologies=technologies[:MAX_TECHNOLOGIES])
+    return WebFingerprintResult(
+        target=target,
+        technologies=technologies[:MAX_TECHNOLOGIES],
+        artifact_manifests=[{
+            "artifact_ref": f"whatweb-output-{hashlib.sha256(raw).hexdigest()[:16]}",
+            "artifact_type": "TOOL_RAW_OUTPUT",
+            "content": raw.decode("utf-8", errors="replace"),
+            "media_type": "application/json",
+            "redaction_applied": False,
+        }],
+    )
 
 
 async def _default_runner(argv: list[str], output_path: Path, timeout: float) -> int:
@@ -128,17 +143,13 @@ async def _default_runner(argv: list[str], output_path: Path, timeout: float) ->
     try:
         _stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except TimeoutError as exc:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise ToolError("E_TIMEOUT", "WhatWeb execution timed out") from exc
     except asyncio.CancelledError:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise
     return process.returncode or 0

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import hashlib
 import ipaddress
 import os
 import re
@@ -67,6 +69,7 @@ class NmapHostDiscoveryResult(BaseModel):
     target: str
     profile: Literal["host-discovery"]
     hosts: list[NmapHost] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class NmapServiceDiscoveryResult(BaseModel):
@@ -76,6 +79,7 @@ class NmapServiceDiscoveryResult(BaseModel):
     profile: Literal["service-top-100", "service-explicit-ports"]
     requested_ports: list[int] = Field(default_factory=list)
     hosts: list[NmapServiceHost] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _validate_target(target: str) -> ipaddress._BaseNetwork | ipaddress._BaseAddress | str:
@@ -106,10 +110,7 @@ def _address_type(value: str | None) -> str:
 def _text(element: ET.Element | None, attribute: str | None = None) -> str | None:
     if element is None:
         return None
-    if attribute is not None:
-        value = element.attrib.get(attribute)
-    else:
-        value = element.text
+    value = element.attrib.get(attribute) if attribute is not None else element.text
     if value is None:
         return None
     value = value.strip()
@@ -142,7 +143,8 @@ def parse_nmap_xml(
             (item for item in addresses if item.attrib.get("addrtype") in {"ipv4", "ipv6"}),
             None,
         )
-        primary = primary or (addresses[0] if addresses else None)
+        if primary is None:
+            primary = addresses[0] if addresses else None
         address = _text(primary, "addr")
         if not address:
             continue
@@ -232,17 +234,13 @@ async def _default_runner(argv: list[str], timeout: float) -> tuple[int, bytes, 
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except TimeoutError as exc:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise ToolError("E_TIMEOUT", "Nmap execution timed out") from exc
     except asyncio.CancelledError:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             process.kill()
-        except ProcessLookupError:
-            pass
         await process.communicate()
         raise
     return process.returncode or 0, stdout, stderr
@@ -301,6 +299,14 @@ async def _run_profile(
     if returncode != 0:
         raise ToolError("E_TOOL_FAILED", f"Nmap exited with code {returncode}")
     parsed = parse_nmap_xml(stdout, target=target, profile=profile, ports=normalized_ports)
+    artifact = {
+        "artifact_ref": f"nmap-xml-{hashlib.sha256(stdout).hexdigest()[:16]}",
+        "artifact_type": "NETWORK_SCAN_RESULT",
+        "content": stdout.decode("utf-8", errors="replace"),
+        "media_type": "application/xml",
+        "redaction_applied": True,
+    }
+    parsed = parsed.model_copy(update={"artifact_manifests": [artifact]})
     if isinstance(parsed, NmapHostDiscoveryResult):
         truncated = len(parsed.hosts) > MAX_HOSTS
         if truncated:

@@ -46,6 +46,7 @@ ERROR_CODES: dict[str, bool] = {
     "E_PARSE": False,  # a malformed document parses the same way twice
     "E_INVALID_ARGUMENT": False,  # the caller's mistake
     "E_UNSUPPORTED_INPUT": False,  # likewise
+    "E_SCOPE": False,  # the trusted assessment scope refused the target
     # Raised by this SDK rather than by a tool.
     "E_SERVER_UNAVAILABLE": True,  # MCP server did not start
     "E_TOOL_MISSING": False,  # a check declares a tool no server provides
