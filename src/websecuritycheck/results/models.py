@@ -109,6 +109,16 @@ class FindingDraft(BaseModel):
         default="",
         description="Name of the tool the evidence was quoted from, if it came from one tool.",
     )
+    rule: str = Field(
+        default="",
+        description=(
+            "A short, stable slug for WHAT is wrong, from the skill's list - "
+            "e.g. 'x-frame-options', 'secure', 'expiry'. It is the finding's "
+            "identity across runs, so it must not change when you reword the "
+            "title. Lowercase, no spaces. One location can have several: a "
+            "cookie missing both 'secure' and 'httponly' is two findings."
+        ),
+    )
 
 
 class CheckOutput(BaseModel):
@@ -139,20 +149,26 @@ def slug(text: str) -> str:
     return _SLUG.sub("-", text.lower()).strip("-")
 
 
-def stable_id(check: str, location: str, title: str) -> str:
+def stable_id(check: str, location: str, title: str, rule: str = "") -> str:
     """A finding id that survives between runs, so two runs can be diffed.
 
-    Derived from what the finding is *about* rather than from how it was
-    worded this time: the check, the location, and a slug of the title.
+    Built from what the finding is *about*, not how it was worded this time:
+    the check, the location, and the `rule` - a short stable slug for the
+    defect. Two runs that find the same problem produce the same id even if
+    the model rewords the title, which is the whole point: the diff matches on
+    identity, and identity must not ride on prose the model regenerates.
 
-    Known limit: a model that rewords a title between runs - "CSP header
-    missing" then "no Content-Security-Policy" - produces a different id, and
-    the diff reads it as one finding fixed and another appeared. Location is
-    the stable part, title is not, and the pair is still the best key
-    available without a curated rule catalog. When the checks grow their own
-    rule ids, this becomes `check:rule:location` and the problem disappears.
+    `rule` is why `location` alone is not enough: one location can carry
+    several findings (a cookie missing both `secure` and `httponly`), and
+    `check | location | rule` tells them apart without touching the title.
+
+    **Fallback to the title when `rule` is absent.** A finding with no rule
+    keeps the old `check | location | title` key - no regression - but also
+    the old failure: reword the title and the id moves. Set `rule` to get the
+    stable identity; the skills tell the model to.
     """
-    key = f"{slug(check)}|{location.strip().lower()}|{slug(title)}"
+    discriminator = rule.strip() or title
+    key = f"{slug(check)}|{location.strip().lower()}|{slug(discriminator)}"
     return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
@@ -169,7 +185,7 @@ class Finding(FindingDraft):
     def from_draft(cls, draft: FindingDraft, check: str, tool_refs: Sequence[str]) -> Finding:
         return cls(
             **draft.model_dump(),
-            id=stable_id(check, draft.location, draft.title),
+            id=stable_id(check, draft.location, draft.title, draft.rule),
             tool_refs=list(tool_refs),
         )
 
@@ -236,10 +252,23 @@ class RunDiff(BaseModel):
         default_factory=list,
         description="Previously found; this run could not re-check them because a tool failed.",
     )
+    labels: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Finding id -> its title, for every id in this diff. The buckets hold "
+            "ids because an id is the stable key that survives between runs; a "
+            "reader needs the title too, and a fixed finding's title is not in "
+            "`CheckResult.findings` any more, so the diff has to carry it."
+        ),
+    )
 
     @property
     def is_empty(self) -> bool:
         return not (self.new or self.fixed or self.unverified)
+
+    def label(self, finding_id: str) -> str:
+        """The title behind an id, or the id itself if it was not recorded."""
+        return self.labels.get(finding_id, finding_id)
 
 
 # --------------------------------------------------------------------------

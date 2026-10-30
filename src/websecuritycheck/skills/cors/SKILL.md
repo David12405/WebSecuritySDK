@@ -112,6 +112,10 @@ would have hidden.
   `allow_origin` value as it came back, and `origin_tested` beside it so a
   reader can see what was sent.
 - `location` is the URL that was probed.
+- `rule` is the aspect the problem is about, lowercase — `allow-origin`,
+  `allow-credentials`, `reflects-origin`, `wildcard`. It is what tells two
+  findings on the same URL apart, and the finding's identity across runs, so
+  keep it identical every time even as you reword the title.
 - A tool failure is an error, never a finding.
 - Never say the site "allows requests from anywhere". CORS does not stop
   requests. Say what can be **read**.

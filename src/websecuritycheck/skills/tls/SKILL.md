@@ -137,6 +137,10 @@ observable, it is the same for everyone, and it does not need a scale.
 
 - Quote the evidence from the tool result of **this** run.
 - `location` is the host and port — `github.com:443` — not a header name.
+- `rule` is the aspect the problem is about, lowercase — `expiry`, `chain`,
+  `protocol`, `cipher`, `hostname`. It is what tells two findings on the same
+  host apart, and the finding's identity across runs, so keep it identical
+  every time even as you reword the title.
 - A handshake that failed is an error, never a finding.
 - Say what this handshake negotiated, never what the server "supports".
 - Report, do not advise. State what was negotiated and what it exposes. Do

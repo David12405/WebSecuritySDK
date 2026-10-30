@@ -67,6 +67,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--json", dest="json_path", help="write the result as JSON")
     parser.add_argument("--sarif", dest="sarif_path", help="write the result as SARIF 2.1.0")
+    parser.add_argument(
+        "--history",
+        dest="history_db",
+        help="SQLite path to record runs in and diff against; run twice to see the diff",
+    )
     return parser.parse_args()
 
 
@@ -81,6 +86,7 @@ def main() -> int:
             allow_subdomains=args.subdomains,
             trace_level=args.trace,
             use_judge=args.judge,
+            history_db=args.history_db,
         )
     except ValueError as exc:  # a bad scope is the caller's mistake, not a crash
         print(f"error: {exc}", file=sys.stderr)
@@ -150,6 +156,22 @@ def report(result, *, trace: bool) -> None:
             code = f" [{error.code}]" if error.code else ""
             where = f" ({error.tool})" if error.tool else ""
             print(f"    {error.kind}{code}{where}: {error.message}")
+
+    # Only present with --history, and only from the second run on - the first
+    # run of a target and check has nothing to compare against.
+    if result.diff is not None:
+        diff = result.diff
+        print(f"  DIFF (vs run {diff.previous_run_id})")
+        for label, ids in (
+            ("new", diff.new),
+            ("fixed", diff.fixed),
+            ("unchanged", diff.unchanged),
+            ("unverified", diff.unverified),
+        ):
+            for finding_id in ids:
+                # The title, not the id: "new 1a9bd79b152f" tells a reader
+                # nothing, "new Missing CSP header" tells them what changed.
+                print(f"    {label:11} {diff.label(finding_id)}")
 
     if trace and result.trace:
         print("  TRACE")

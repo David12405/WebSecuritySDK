@@ -31,6 +31,7 @@ from strands import Agent
 from ..checks.base import Check
 from ..config import Settings
 from ..memory.context import framework_tools_for
+from ..memory.target_store import TargetStore
 from ..policy.injection_guard import InjectionGuard
 from ..policy.judge import judge
 from ..policy.scope_guard import ScopeGuard, in_scope
@@ -162,7 +163,7 @@ def _run(
     errors.extend(scope_guard.errors)
     errors.extend(injection_guard.errors)
 
-    return CheckResult.build(
+    result = CheckResult.build(
         check=check.name,
         target=target,
         output=output,
@@ -173,6 +174,24 @@ def _run(
         started_at=started,
         finished_at=datetime.now(UTC),
     )
+    _remember(result, check, settings, trace.tools_seen)
+    return result
+
+
+def _remember(
+    result: CheckResult, check: Check, settings: Settings, tools_ok: set[str]
+) -> None:
+    """Record this run and diff it against the open-findings ledger.
+
+    Opt-in: with no `history_db` the SDK keeps no history and `diff` stays
+    `None`. The store owns the whole transaction - read the ledger, diff,
+    save, update the ledger - so an unverified finding is carried forward
+    across runs rather than dropping out of a later baseline.
+    """
+    if settings.history_db is None:
+        return
+    with TargetStore(settings.history_db) as store:
+        result.diff = store.reconcile(result, tools_ok=tools_ok, check_tools=check.tools)
 
 
 def _steer(
