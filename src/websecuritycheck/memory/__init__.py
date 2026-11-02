@@ -1,13 +1,22 @@
-"""Memory - short term (context manager) and long term (TargetStore).
+"""Memory - durable target storage and the run-history diff.
 
-Long term is implemented: `target_store.TargetStore` is a SQLite history of
-runs, and `diff.diff_runs` is the pure comparison that turns a baseline and
-this run into a `RunDiff`. The runner reads the baseline before a run and
-saves the run after, so each is diffed against the last of the same check on
-the same target. Opt-in via `Settings.history_db`.
+Two durable stores, two jobs, kept in separate modules on purpose:
 
-Short term - the context-manager configuration in `context.py` - is still
-deferred. It is not on the critical path while every check is one tool and
-one turn and the injection guard already bounds per-call output; only the
+**`target_store`** (`TargetStore` / `SQLiteTargetStore`) is the partner's
+canonical recon persistence - the `TargetModel` snapshot and the
+append-only execution journal, keyed by assessment and target.
+
+**`history`** (`RunHistory`) is the check-result history and the
+open-findings ledger behind `CheckResult.diff`: it records each run, diffs
+it against the open set, and carries an unverified finding forward until a
+later run re-measures it. Opt-in via `Settings.history_db`. The pure
+comparison is `memory.diff.diff_runs`.
+
+Short-term context (`context.py`) is still deferred - only the
 framework-tool exemption, which the scope guard needs, lives there today.
 """
+
+from .history import RunHistory
+from .target_store import SQLiteTargetStore, TargetStore
+
+__all__ = ["RunHistory", "SQLiteTargetStore", "TargetStore"]

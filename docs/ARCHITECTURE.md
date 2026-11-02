@@ -327,6 +327,10 @@ an improvement.
 
 ## 6. Scope policy
 
+CIDR/IP matching is currently frozen at the existing scope-guard behavior:
+bare network targets use containment, while HTTP(S) targets use the URL rules
+below. It is intentionally not part of the current policy-schema redesign.
+
 Scope is required at construction. There is no default and no "scan anything"
 mode.
 

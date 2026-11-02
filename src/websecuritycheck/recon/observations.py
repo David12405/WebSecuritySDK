@@ -346,7 +346,6 @@ def _whatweb(
                     version=(
                         technology.get("version") or (technology.get("versions") or [None])[0]
                     ),
-                    confidence=str(technology.get("confidence") or "UNKNOWN").upper(),
                 ),
                 refs,
                 f"technologies[{index}]",

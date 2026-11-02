@@ -78,6 +78,20 @@ def test_same_endpoint_different_query_values_merge_on_update():
     assert second.updated_target_model.revision == 2
 
 
+def test_endpoint_identity_is_stable_hash_of_canonical_endpoint():
+    first = process_tool_result(
+        _execution({"url": "https://EXAMPLE.com/api/users?id=1", "method": "get", "status": 200})
+    )
+    second = process_tool_result(
+        _execution({"url": "https://example.com/api/users?id=2", "method": "GET", "status": 200})
+    )
+    assert (
+        first.updated_target_model.endpoints[0].endpoint_id
+        == second.updated_target_model.endpoints[0].endpoint_id
+    )
+    assert len(first.updated_target_model.endpoints[0].endpoint_id) == 12
+
+
 @pytest.mark.parametrize(
     ("result_type", "result_data", "expected_observations"),
     [

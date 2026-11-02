@@ -23,6 +23,8 @@ openai = ["openai>=1.0"]
 # The explore_browser L6 tool drives a real Chromium through Playwright.
 # After installing, run `playwright install chromium` for the browser itself.
 browser = ["playwright>=1.40"]
+# Everything optional at once.
+all = ["openai>=1.0", "playwright>=1.40"]
 dev = ["pytest>=8", "ruff>=0.14"]
 
 [tool.hatch.build.targets.wheel]

@@ -66,6 +66,6 @@ def test_target_model_revision_fields_are_present():
         assessment_id="ASM-001",
         last_updated=datetime.now(UTC),
     )
-    assert model.schema_version == "2.0.0"
+    assert model.schema_version == "3.0.0"
     assert model.revision == 1
     assert not hasattr(model, "revision_history")

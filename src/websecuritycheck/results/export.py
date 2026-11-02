@@ -253,6 +253,8 @@ def _notification(error: ErrorInfo) -> dict[str, Any]:
         notification["properties"]["tool"] = error.tool
     if error.step_ref:
         notification["properties"]["stepRef"] = error.step_ref
+    if error.execution_ref:
+        notification["properties"]["executionRef"] = error.execution_ref
     return notification
 
 
@@ -275,6 +277,8 @@ def _step(step: TraceStep) -> dict[str, Any]:
         entry["code"] = step.code
     if step.duration_ms is not None:
         entry["durationMs"] = step.duration_ms
+    if step.execution_ref:
+        entry["executionRef"] = step.execution_ref
     return entry
 
 

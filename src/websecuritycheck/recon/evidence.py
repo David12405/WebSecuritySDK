@@ -26,7 +26,7 @@ class RecordIdAllocator:
     def __init__(self, existing: Iterable[str] = ()) -> None:
         self._next: dict[str, int] = {}
         for value in existing:
-            match = re.fullmatch(r"([A-Z]{3,})-(\d{3,})", value)
+            match = re.fullmatch(r"([A-Z]{2,})-(\d{3,})", value)
             if match:
                 prefix, number = match.groups()
                 self._next[prefix] = max(self._next.get(prefix, 0), int(number)) + 1

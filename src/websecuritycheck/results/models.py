@@ -21,13 +21,14 @@ blocked, which failed, which answers were sent back. Without it
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..identity import stable_hash
 
 # --------------------------------------------------------------------------
 # Vocabularies
@@ -45,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 #: knows their own system and can rank what it says; the SDK knows one
 #: response.
 
-ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection"]
+ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection", "storage"]
 
 Status = Literal["passed", "issues_found", "failed", "partial"]
 
@@ -149,7 +150,7 @@ def slug(text: str) -> str:
     return _SLUG.sub("-", text.lower()).strip("-")
 
 
-def stable_id(check: str, location: str, title: str, rule: str = "") -> str:
+def stable_finding_id(check: str, location: str, title: str, rule: str = "") -> str:
     """A finding id that survives between runs, so two runs can be diffed.
 
     Built from what the finding is *about*, not how it was worded this time:
@@ -169,7 +170,13 @@ def stable_id(check: str, location: str, title: str, rule: str = "") -> str:
     """
     discriminator = rule.strip() or title
     key = f"{slug(check)}|{location.strip().lower()}|{slug(discriminator)}"
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    return stable_hash(key)
+
+
+def stable_id(check: str, location: str, title: str, rule: str = "") -> str:
+    """Backward-compatible alias for stable_finding_id."""
+
+    return stable_finding_id(check, location, title, rule)
 
 
 class Finding(FindingDraft):
@@ -185,7 +192,7 @@ class Finding(FindingDraft):
     def from_draft(cls, draft: FindingDraft, check: str, tool_refs: Sequence[str]) -> Finding:
         return cls(
             **draft.model_dump(),
-            id=stable_id(check, draft.location, draft.title, draft.rule),
+            id=stable_finding_id(check, draft.location, draft.title, draft.rule),
             tool_refs=list(tool_refs),
         )
 
@@ -205,6 +212,7 @@ class ErrorInfo(BaseModel):
         default=None,
         description="Trace step this error came from, when it came from one.",
     )
+    execution_ref: str | None = None
 
 
 class TraceStep(BaseModel):
@@ -224,6 +232,7 @@ class TraceStep(BaseModel):
     detail: str = ""
     code: str | None = None
     duration_ms: int | None = None
+    execution_ref: str | None = None
 
     @field_validator("summary", "detail")
     @classmethod

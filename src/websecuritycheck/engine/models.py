@@ -39,6 +39,12 @@ def build_model(model: str, *, api_key: str | None = None, temperature: float = 
     provider, model_id = split_model(model)
 
     if provider == "openai":
+        try:
+            from strands.models.openai import OpenAIModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenAI support is optional; install websecuritycheck[openai]"
+            ) from exc
         key = api_key or os.environ.get(API_KEY_VARS["openai"])
         if not key:
             raise ValueError(

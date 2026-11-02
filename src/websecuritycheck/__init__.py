@@ -24,6 +24,7 @@ this package is internal and may change without notice.
 __version__ = "0.1.0"
 
 from .checker import SecurityChecker
+from .memory import SQLiteTargetStore, TargetStore
 from .results.models import (
     CheckResult,
     ErrorInfo,
@@ -37,7 +38,9 @@ __all__ = [
     "ErrorInfo",
     "Finding",
     "RunDiff",
+    "SQLiteTargetStore",
     "SecurityChecker",
+    "TargetStore",
     "TraceStep",
     "__version__",
 ]

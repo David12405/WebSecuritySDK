@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 
 from _builders import finding
 from websecuritycheck.memory.diff import diff_runs
-from websecuritycheck.memory.target_store import TargetStore
+from websecuritycheck.memory.history import RunHistory
 from websecuritycheck.results.models import CheckOutput, CheckResult
 
 # --------------------------------------------------------------------------
@@ -111,7 +111,7 @@ def test_the_diff_can_name_every_finding_including_the_gone_ones() -> None:
 
 
 # --------------------------------------------------------------------------
-# TargetStore - persistence
+# RunHistory - persistence
 # --------------------------------------------------------------------------
 
 
@@ -133,7 +133,7 @@ def test_a_saved_run_is_read_back_as_the_baseline(tmp_path) -> None:
     db = tmp_path / "history.db"
     from _builders import draft
 
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         store.save(_result("https://x.test", "headers", findings=[draft()], run_id="first"))
         baseline = store.baseline("https://x.test", "headers")
 
@@ -145,7 +145,7 @@ def test_a_saved_run_is_read_back_as_the_baseline(tmp_path) -> None:
 
 def test_the_baseline_is_the_most_recent_measuring_run(tmp_path) -> None:
     db = tmp_path / "history.db"
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         store.save(_result("https://x.test", "headers", run_id="old"))
         store.save(_result("https://x.test", "headers", run_id="new"))
         assert store.baseline("https://x.test", "headers").run_id == "new"
@@ -155,7 +155,7 @@ def test_a_run_that_measured_nothing_is_not_a_baseline(tmp_path) -> None:
     """Saved for history, skipped as a baseline: its empty findings mean
     'did not look', not 'found nothing'."""
     db = tmp_path / "history.db"
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         store.save(_result("https://x.test", "headers", run_id="good", tools_ran=1))
         store.save(_result("https://x.test", "headers", run_id="blind", tools_ran=0))
         assert store.baseline("https://x.test", "headers").run_id == "good"
@@ -164,7 +164,7 @@ def test_a_run_that_measured_nothing_is_not_a_baseline(tmp_path) -> None:
 
 def test_runs_are_scoped_to_their_target_and_check(tmp_path) -> None:
     db = tmp_path / "history.db"
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         store.save(_result("https://a.test", "headers", run_id="a"))
         store.save(_result("https://b.test", "headers", run_id="b"))
         store.save(_result("https://a.test", "tls", run_id="c"))
@@ -176,7 +176,7 @@ def test_runs_are_scoped_to_their_target_and_check(tmp_path) -> None:
 
 def test_the_store_creates_its_file_and_parent(tmp_path) -> None:
     db = tmp_path / "nested" / "dir" / "history.db"
-    with TargetStore(db):
+    with RunHistory(db):
         pass
     assert db.exists()
 
@@ -209,7 +209,7 @@ def test_remember_diffs_against_the_baseline_and_saves(tmp_path) -> None:
     assert second.diff.fixed and second.diff.unverified == []
 
     # Both runs are on record.
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         assert len(store.history("https://x.test", "headers")) == 2
 
 
@@ -231,7 +231,7 @@ def test_unverified_is_carried_across_runs_until_remeasured(tmp_path) -> None:
     y_id = stable_id("deep", "y", "Y problem")
 
     db = tmp_path / "history.db"
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         # Run 1: both tools measure, both problems present.
         store.reconcile(
             _result("https://t.test", "deep", findings=[x, y], tools_ran=2, run_id="r1"),
@@ -275,7 +275,7 @@ def test_the_ledger_marks_present_and_unverified(tmp_path) -> None:
     y = draft(title="Y problem", location="y", source_tool="tool_b")
 
     db = tmp_path / "history.db"
-    with TargetStore(db) as store:
+    with RunHistory(db) as store:
         store.reconcile(
             _result("https://t.test", "deep", findings=[x, y], tools_ran=2, run_id="r1"),
             tools_ok={"tool_a", "tool_b"},

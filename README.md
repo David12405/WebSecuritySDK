@@ -61,6 +61,7 @@ result.trace      # every step the agent took
 
 ```bash
 pip install -e ".[dev]"
+pip install -e ".[openai,browser]"  # only when those integrations are needed
 cp .env.example .env     # only needed for a full agent run, later
 ```
 

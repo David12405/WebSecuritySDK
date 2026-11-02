@@ -18,7 +18,6 @@ from .enums import (
     ArtifactType,
     AuthMechanism,
     CapabilityType,
-    ConfidenceLevel,
     DiscoverySource,
     InputLocation,
     ObservationSource,
@@ -30,6 +29,7 @@ from .enums import (
 )
 
 Id = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2,}-[0-9]{3,}$")]
+EndpointId = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{12}$")]
 JsonValue = Any
 
 
@@ -113,7 +113,7 @@ class ExecutionPolicy(StrictModel):
 
 class AssessmentConfig(StrictModel):
     assessment_id: Id
-    schema_version: str = "2.0.0"
+    schema_version: str = "3.0.0"
     target: HttpUrl
     authorized_scope: list[str] = Field(min_length=1)
     excluded_scope: list[str] = Field(default_factory=list)
@@ -236,7 +236,6 @@ class TechnologyObservationPayload(StrictModel):
     name: str = Field(min_length=1)
     category: TechnologyCategory
     version: str | None = None
-    confidence: ConfidenceLevel = ConfidenceLevel.UNKNOWN
 
 
 class BrowserBehaviorObservationPayload(StrictModel):
@@ -309,7 +308,7 @@ class ObservationRecord(StrictModel):
 
 
 class EndpointDefinition(StrictModel):
-    endpoint_id: Id
+    endpoint_id: EndpointId
     origin: str
     path: str = Field(min_length=1)
     method: str = Field(min_length=1)
@@ -353,7 +352,6 @@ class TechnologyRecord(StrictModel):
     category: TechnologyCategory
     name: str = Field(min_length=1)
     version: str | None = None
-    confidence: ConfidenceLevel = ConfidenceLevel.UNKNOWN
     observation_refs: list[Id] = Field(default_factory=list)
     evidence_refs: list[Id] = Field(default_factory=list)
 
@@ -361,7 +359,7 @@ class TechnologyRecord(StrictModel):
 class TargetModel(StrictModel):
     target_id: Id
     assessment_id: Id
-    schema_version: str = "2.0.0"
+    schema_version: str = "3.0.0"
     revision: int = Field(default=1, ge=1)
     last_updated: datetime
     scope_rules: AssessmentConfig | None = None

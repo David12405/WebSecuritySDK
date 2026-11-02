@@ -59,13 +59,6 @@ class InputLocation(StrEnum):
     DOM = "DOM"
 
 
-class ConfidenceLevel(StrEnum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    UNKNOWN = "UNKNOWN"
-
-
 class TechnologyCategory(StrEnum):
     WEB_SERVER = "WEB_SERVER"
     FRAMEWORK = "FRAMEWORK"
