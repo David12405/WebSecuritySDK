@@ -103,6 +103,8 @@ class TraceCollector:
     `trace_level="off"`.
     """
 
+    execution_refs: dict[str, str] = field(default_factory=dict)
+
     # -- writing ---------------------------------------------------------
 
     def record(
@@ -115,6 +117,7 @@ class TraceCollector:
         detail: str = "",
         code: str | None = None,
         duration_ms: int | None = None,
+        execution_ref: str | None = None,
     ) -> TraceStep | None:
         """Add a step, unless this kind is filtered out at this level.
 
@@ -133,6 +136,7 @@ class TraceCollector:
             detail=detail,
             code=code,
             duration_ms=duration_ms,
+            execution_ref=execution_ref,
         )
         self._next += 1
         self.steps.append(step)
@@ -200,6 +204,7 @@ class TraceCollector:
             summary=message_of(text) if failed else "completed",
             code=code_of(text) if failed else None,
             duration_ms=duration,
+            execution_ref=self.execution_refs.get(event.tool_use.get("toolUseId") or ""),
         )
 
     def _after_model(self, event: AfterModelCallEvent) -> None:

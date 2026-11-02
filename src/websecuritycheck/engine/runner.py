@@ -38,6 +38,7 @@ from ..policy.steering import MAX_ROUNDS, SteeringIssue, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
 from ..telemetry.trace import TraceCollector
 from ..tools.mcp import ToolProvider, load_server_specs
+from ..tools.result_adapter import ToolResultAdapter
 from .models import build_model
 from .prompts import opening_message, system_prompt
 
@@ -103,6 +104,16 @@ def _run(
         allow_subdomains=settings.allow_subdomains,
     )
     injection_guard = InjectionGuard(output_tool=check.output_model.__name__)
+    adapter = (
+        ToolResultAdapter(
+            settings.assessment_id,
+            settings.target_store,
+            exempt=exempt,
+            execution_refs=trace.execution_refs,
+        )
+        if settings.assessment_id and settings.target_store
+        else None
+    )
 
     specs = load_server_specs(settings.servers_config)
     with ToolProvider(specs) as provider:
@@ -128,7 +139,7 @@ def _run(
             tools=tools,
             system_prompt=system_prompt(check),
             structured_output_model=check.output_model,
-            hooks=[scope_guard, injection_guard, trace],
+            hooks=[scope_guard, injection_guard, *([adapter] if adapter else []), trace],
             callback_handler=None,  # the trace is the record; stdout is not
         )
 
@@ -161,6 +172,8 @@ def _run(
     # The guards collected their own refusals while the loop ran.
     errors.extend(scope_guard.errors)
     errors.extend(injection_guard.errors)
+    if adapter:
+        errors.extend(adapter.errors)
 
     return CheckResult.build(
         check=check.name,

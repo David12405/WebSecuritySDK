@@ -14,6 +14,7 @@ from websecuritycheck.domain import (
     ObservationSource,
     ObservedParameter,
 )
+from websecuritycheck.identity import stable_hash
 
 from .evidence import RecordIdAllocator
 
@@ -99,7 +100,7 @@ def _merge_parameters(
 def endpoint_from_observation(
     observation: ObservationRecord,
     payload: EndpointObservationPayload,
-    allocator: RecordIdAllocator,
+    allocator: RecordIdAllocator | None = None,
 ) -> EndpointDefinition:
     parameters = []
     for parameter in payload.parameters:
@@ -108,7 +109,11 @@ def endpoint_from_observation(
         enriched.evidence_refs = sorted(set(enriched.evidence_refs + observation.evidence_refs))
         parameters.append(enriched)
     return EndpointDefinition(
-        endpoint_id=allocator.new("EP"),
+        endpoint_id=stable_hash(
+            normalize_origin(payload.origin),
+            normalize_path(payload.path),
+            normalize_method(payload.method),
+        ),
         origin=normalize_origin(payload.origin),
         path=normalize_path(payload.path),
         method=normalize_method(payload.method),
@@ -161,7 +166,6 @@ def normalize_endpoints(
     existing: list[EndpointDefinition] | None = None,
     allocator: RecordIdAllocator | None = None,
 ) -> list[EndpointDefinition]:
-    allocator = allocator or RecordIdAllocator(item.endpoint_id for item in existing or [])
     merged: dict[tuple[str, str, str], EndpointDefinition] = {
         endpoint_key(item.origin, item.path, item.method): item.model_copy(deep=True)
         for item in (existing or [])
@@ -169,7 +173,7 @@ def normalize_endpoints(
     for observation in observations:
         if not isinstance(observation.payload, EndpointObservationPayload):
             continue
-        incoming = endpoint_from_observation(observation, observation.payload, allocator)
+        incoming = endpoint_from_observation(observation, observation.payload)
         key = endpoint_key(incoming.origin, incoming.path, incoming.method)
         if key in merged:
             merge_endpoint(merged[key], incoming)

@@ -21,6 +21,7 @@ from .models import (
     StepStatus,
     TraceStep,
     decide_status,
+    stable_finding_id,
     stable_id,
 )
 
@@ -39,6 +40,7 @@ __all__ = [
     "StepStatus",
     "TraceStep",
     "decide_status",
+    "stable_finding_id",
     "stable_id",
     "summary_line",
     "summary_lines",

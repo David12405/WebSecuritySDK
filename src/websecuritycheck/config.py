@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .memory.target_store import TargetStore
 from .policy.scope_guard import ScopeEntry, normalize_scope
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +70,9 @@ class Settings:
     never clear one - turning it on cannot loosen a boundary, only spend
     model calls and risk a worse answer."""
 
+    assessment_id: str | None = None
+    target_store: TargetStore | None = None
+
     _entries: list[ScopeEntry] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -80,6 +84,8 @@ class Settings:
         # Parses and validates now, so a malformed scope is the caller's
         # error at construction rather than a confusing block mid-run.
         self._entries = normalize_scope(self.scope)
+        if (self.assessment_id is None) != (self.target_store is None):
+            raise ValueError("assessment_id and target_store must be provided together")
 
     @property
     def entries(self) -> list[ScopeEntry]:
