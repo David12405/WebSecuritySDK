@@ -35,7 +35,6 @@ def normalize_technologies(
                 category=payload.category,
                 name=payload.name,
                 version=payload.version,
-                confidence=payload.confidence,
                 observation_refs=[observation.observation_id],
                 evidence_refs=sorted(set(observation.evidence_refs)),
             )
@@ -45,8 +44,6 @@ def normalize_technologies(
         record = merged[key]
         record.observation_refs = sorted(set(record.observation_refs + incoming.observation_refs))
         record.evidence_refs = sorted(set(record.evidence_refs + incoming.evidence_refs))
-        if record.confidence.value == "UNKNOWN" or incoming.confidence.value == "HIGH":
-            record.confidence = incoming.confidence
     return sorted(
         merged.values(), key=lambda item: _key(item.category.value, item.name, item.version)
     )
