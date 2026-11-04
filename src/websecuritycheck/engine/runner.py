@@ -1,23 +1,4 @@
-"""Builds and drives the agent for one check.  Steps 2 to 7 of the diagram.
 
-Step 2  assemble the Agent from the `Check`: prompt, skill text, tool
-        allowlist, structured-output schema, hooks.
-Step 3  start the run - the trace opens, the servers come up.
-Steps 4-6  the loop, owned by Strands, with our hooks riding along.
-Step 7  finish: assemble a `CheckResult` from what actually happened.
-
-The runner owns `status`, `errors`, `diff` and `trace`. The model produces
-`CheckOutput` - findings and notes - and nothing else, so it cannot declare
-a check passed when a tool failed.
-
-**Why the agent is invoked rather than asked for structured output
-directly.** `Agent.structured_output()` calls the model once with no loop:
-no tool call, no `BeforeToolCall` event, no evidence. The system prompt
-forbids unevidenced findings, so the model correctly returns nothing - and
-"nothing was measured" would become "passed". Declaring
-`structured_output_model` on the Agent and invoking it normally runs the
-loop with tools and forces the structured-output tool at the end.
-"""
 
 from __future__ import annotations
 
@@ -34,6 +15,7 @@ from ..memory.context import framework_tools_for
 from ..memory.history import RunHistory
 from ..policy.injection_guard import InjectionGuard
 from ..policy.judge import judge
+from ..policy.retry import RetryGuard
 from ..policy.scope_guard import ScopeGuard, in_scope
 from ..policy.steering import MAX_ROUNDS, SteeringIssue, error_code, message_for, review
 from ..results.models import CheckOutput, CheckResult, ErrorInfo
@@ -105,6 +87,7 @@ def _run(
         allow_subdomains=settings.allow_subdomains,
     )
     injection_guard = InjectionGuard(output_tool=check.output_model.__name__)
+    retry_guard = RetryGuard(exempt=exempt)
     adapter = (
         ToolResultAdapter(
             settings.assessment_id,
@@ -140,7 +123,16 @@ def _run(
             tools=tools,
             system_prompt=system_prompt(check),
             structured_output_model=check.output_model,
-            hooks=[scope_guard, injection_guard, *([adapter] if adapter else []), trace],
+            # Order within the list does not decide run order - each hook's
+            # `order=` does - but retry (5) reads the raw error before the
+            # injection guard (10) wraps it, and the trace (20) records last.
+            hooks=[
+                scope_guard,
+                retry_guard,
+                injection_guard,
+                *([adapter] if adapter else []),
+                trace,
+            ],
             callback_handler=None,  # the trace is the record; stdout is not
         )
 
@@ -172,6 +164,7 @@ def _run(
 
     # The guards collected their own refusals while the loop ran.
     errors.extend(scope_guard.errors)
+    errors.extend(retry_guard.errors)
     errors.extend(injection_guard.errors)
     if adapter:
         errors.extend(adapter.errors)
