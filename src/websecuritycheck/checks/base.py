@@ -65,6 +65,20 @@ class Check:
     max_turns: int = 6
     """A loop that has not answered in this many turns is not about to."""
 
+    required_tools: tuple[str, ...] | None = None
+    """Tools that must have run successfully, or `None` for "all of them".
+
+    `tools` is an allowlist - *may* call - and the scope guard enforces it
+    by cancelling anything else. That is a different statement from *must*
+    call, and conflating the two would mean a check could never offer an
+    optional tool: a recon step that calls `get_tls_info` only for an https
+    target would be reported as incomplete on every http one.
+
+    `None` rather than a copy of `tools` so the common case stays a single
+    declaration. Today every check names one tool and its skill says to call
+    it exactly once, which makes "all of them" the honest default.
+    """
+
     in_default_scan: bool = True
     """Does `check_all` run this one?
 
@@ -94,6 +108,11 @@ class Check:
     @property
     def coverage_topics(self) -> tuple[str, ...]:
         return tuple(self.required_coverage)
+
+    @property
+    def must_call(self) -> tuple[str, ...]:
+        """The tools a complete run has used. See `required_tools`."""
+        return self.tools if self.required_tools is None else self.required_tools
 
 
 @cache

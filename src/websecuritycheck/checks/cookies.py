@@ -20,7 +20,10 @@ COOKIES = register(
             "result by what that cookie plainly is: a missing flag on a session or "
             "auth cookie is a different finding from the same flag missing on an "
             "analytics cookie. Never quote or reconstruct a cookie value - the probe "
-            "returns only its length, deliberately."
+            "returns only its length, deliberately.\n\n"
+            "Name Secure, HttpOnly and SameSite in `notes`, including when the "
+            "response set no cookies at all. 'No cookies were set' is true and does "
+            "not tell a reader which attributes you went looking for."
         ),
         tools=("get_cookies",),
         required_coverage={

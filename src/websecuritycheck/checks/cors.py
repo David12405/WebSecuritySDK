@@ -21,7 +21,10 @@ CORS = register(
             "allowed alongside a permissive origin, or if a shared cache could serve "
             "one origin's response to another. No CORS headers at all is the secure "
             "default - say so and report nothing. CORS governs what a page may "
-            "*read*, never what it may request; phrase findings that way."
+            "*read*, never what it may request; phrase findings that way.\n\n"
+            "Name allow_origin and allow_credentials in `notes`, with the values the "
+            "probe returned for them, including when both are absent. 'No CORS "
+            "headers were present' does not say which two you checked for."
         ),
         tools=("get_cors_policy",),
         required_coverage={

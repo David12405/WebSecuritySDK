@@ -17,7 +17,6 @@ def draft(
 ) -> FindingDraft:
     return FindingDraft(
         title=title,
-        severity=kw.pop("severity", "high"),
         location=location,
         evidence=kw.pop("evidence", "Response headers contained no Content-Security-Policy."),
         **kw,

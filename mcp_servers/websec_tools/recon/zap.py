@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
+import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +26,10 @@ ZAP_POLL_SECONDS = 0.2
 MAX_ENDPOINTS = 1000
 MAX_SIGNALS = 500
 MAX_TEXT = 2048
+MAX_PROXY_MESSAGES = 1000
+PROXY_MESSAGE_PAGE_SIZE = 100
+CAPTURE_TTL_SECONDS = 600.0
+MAX_OPEN_CAPTURES = 128
 ZapRequester = Callable[[str, dict[str, str]], Awaitable[dict[str, Any]]]
 
 
@@ -34,6 +43,9 @@ class CrawledEndpoint(BaseModel):
     path: str
     query_parameter_names: list[str] = Field(default_factory=list)
     method: str | None = None
+    status: int | None = None
+    content_type: str | None = None
+    body_parameter_names: list[str] = Field(default_factory=list)
     source: str = "zap_spider"
 
 
@@ -44,6 +56,7 @@ class CrawlResult(BaseModel):
     spider: str = "traditional"
     completed: bool
     endpoints: list[CrawledEndpoint] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PassiveSecuritySignal(BaseModel):
@@ -68,6 +81,38 @@ class PassiveAnalysisResult(BaseModel):
     spider_completed: bool
     passive_queue_drained: bool
     signals: list[PassiveSecuritySignal] = Field(default_factory=list)
+
+
+class ProxyCaptureBoundaryResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    capture_ref: str
+    expires_at: datetime
+
+
+class ProxyTrafficResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    capture_ref: str
+    completed: bool
+    messages: list[CrawledEndpoint] = Field(default_factory=list)
+    captured_message_count: int = Field(default=0, ge=0)
+    excluded_message_count: int = Field(default=0, ge=0)
+    dropped_message_count: int = Field(default=0, ge=0)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _CaptureBoundary:
+    target_origin: str
+    start_message_index: int
+    expires_at_monotonic: float
+    expires_at: datetime
+
+
+_CAPTURES: dict[str, _CaptureBoundary] = {}
 
 
 class _ZapClient:
@@ -142,9 +187,22 @@ def _origin(target: str) -> tuple[str, str]:
     return origin, parsed.hostname or ""
 
 
-def _same_origin(url: str, origin: str) -> bool:
+def _origin_identity(url: str) -> tuple[str, str, int] | None:
     parsed = urlsplit(url)
-    return f"{parsed.scheme}://{parsed.netloc}" == origin
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname
+    if scheme not in {"http", "https"} or hostname is None:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    effective_port = port if port is not None else (443 if scheme == "https" else 80)
+    return scheme, hostname.rstrip(".").lower(), effective_port
+
+
+def _same_origin(url: str, origin: str) -> bool:
+    return _origin_identity(url) == _origin_identity(origin)
 
 
 def _endpoint(url: str) -> CrawledEndpoint | None:
@@ -162,12 +220,38 @@ def _endpoint(url: str) -> CrawledEndpoint | None:
     )
 
 
+def _endpoint_record(value: Any) -> CrawledEndpoint | None:
+    if isinstance(value, str):
+        return _endpoint(value)
+    if not isinstance(value, dict) or not isinstance(value.get("url"), str):
+        return None
+    item = _endpoint(value["url"])
+    if item is None:
+        return None
+    item.method = str(value["method"]).upper() if value.get("method") else None
+    raw_status = value.get("status", value.get("response_status"))
+    item.status = int(raw_status) if isinstance(raw_status, int) else None
+    raw_content_type = value.get("content_type", value.get("response_content_type"))
+    item.content_type = str(raw_content_type) if raw_content_type else None
+    raw_body_names = value.get("body_parameter_names", value.get("form_parameter_names", []))
+    item.body_parameter_names = sorted(str(name) for name in raw_body_names if name)
+    return item
+
+
 def parse_spider_urls(raw_urls: Any, *, target: str) -> list[CrawledEndpoint]:
     origin = _origin(target)[0]
     if not isinstance(raw_urls, list):
         return []
-    urls = sorted({url for url in raw_urls if isinstance(url, str) and _same_origin(url, origin)})
-    return [item for url in urls if (item := _endpoint(url)) is not None]
+    values = raw_urls if isinstance(raw_urls, list) else []
+    endpoints = [
+        item
+        for value in values
+        if (item := _endpoint_record(value)) is not None and _same_origin(item.url, origin)
+    ]
+    deduped: dict[tuple[str, str | None], CrawledEndpoint] = {}
+    for item in endpoints:
+        deduped[(item.url, item.method)] = item
+    return [deduped[key] for key in sorted(deduped)]
 
 
 def parse_passive_alerts(raw_alerts: Any, *, target: str) -> list[PassiveSecuritySignal]:
@@ -196,13 +280,295 @@ def parse_passive_alerts(raw_alerts: Any, *, target: str) -> list[PassiveSecurit
 
 
 def _context_regex(origin: str) -> str:
-    return re.escape(origin) + ".*"
+    return re.escape(origin) + r"(?:/|$).*"
 
 
 def _limited_text(value: Any, fallback: str | None = None) -> str | None:
     if not isinstance(value, str):
         return fallback
     return value[:MAX_TEXT]
+
+
+def _prune_captures(now: float | None = None) -> None:
+    current = time.monotonic() if now is None else now
+    for capture_ref, boundary in list(_CAPTURES.items()):
+        if boundary.expires_at_monotonic <= current:
+            del _CAPTURES[capture_ref]
+
+
+def _capture_ref() -> str:
+    return f"ZCAP-{uuid.uuid4().hex}"
+
+
+async def _message_count(client: _ZapClient) -> int:
+    response = await client.get("/JSON/core/view/numberOfMessages/")
+    raw_count = response.get("numberOfMessages")
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError) as exc:
+        raise ToolError("E_PARSE", "ZAP message count was invalid") from exc
+    if count < 0:
+        raise ToolError("E_PARSE", "ZAP message count was invalid")
+    return count
+
+
+def _headers(raw_headers: Any) -> tuple[str, dict[str, str]]:
+    if not isinstance(raw_headers, str):
+        return "", {}
+    lines = raw_headers[:65536].replace("\r\n", "\n").split("\n")
+    start_line = lines[0].strip() if lines else ""
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if ":" not in line:
+            continue
+        name, value = line.split(":", 1)
+        normalized = name.strip().lower()
+        if normalized and normalized not in headers:
+            headers[normalized] = value.strip()
+    return start_line, headers
+
+
+def _json_field_names(value: Any, prefix: str = "") -> list[str]:
+    names: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            name = f"{prefix}.{key}" if prefix else str(key)
+            names.append(name[:MAX_TEXT])
+            names.extend(_json_field_names(child, name))
+    elif isinstance(value, list):
+        for child in value[:10]:
+            names.extend(_json_field_names(child, prefix))
+    return names
+
+
+def _body_parameter_names(raw_body: Any, content_type: str | None) -> list[str]:
+    if not isinstance(raw_body, str) or not raw_body or not content_type:
+        return []
+    normalized = content_type.lower()
+    if "json" in normalized:
+        try:
+            value = json.loads(raw_body)
+        except (TypeError, ValueError):
+            return []
+        return sorted(set(_json_field_names(value)))
+    if "x-www-form-urlencoded" in normalized:
+        return sorted({name[:MAX_TEXT] for name, _ in parse_qsl(raw_body, keep_blank_values=True)})
+    if "multipart/form-data" in normalized:
+        return sorted(set(re.findall(r'name="([^"\r\n]{1,2048})"', raw_body)))
+    return []
+
+
+def _proxy_message(value: Any, *, target: str) -> CrawledEndpoint | None:
+    if not isinstance(value, dict):
+        return None
+    request_line, request_headers = _headers(value.get("requestHeader"))
+    parts = request_line.split(" ", 2)
+    if len(parts) < 2:
+        return None
+    method, request_target = parts[0].upper(), parts[1]
+    target_origin = _origin(target)[0]
+    if request_target.startswith(("http://", "https://")):
+        request_url = request_target
+    elif request_target.startswith("/"):
+        host = request_headers.get("host")
+        scheme = urlsplit(target_origin).scheme
+        request_url = (
+            f"{scheme}://{host}{request_target}"
+            if host
+            else urljoin(target_origin, request_target)
+        )
+    else:
+        return None
+    parsed = urlsplit(request_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if not _same_origin(request_url, target_origin):
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    query_names = sorted(
+        {name[:MAX_TEXT] for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+    )
+    sanitized_host = parsed.hostname
+    if ":" in sanitized_host and not sanitized_host.startswith("["):
+        sanitized_host = f"[{sanitized_host}]"
+    sanitized_netloc = f"{sanitized_host}:{port}" if port is not None else sanitized_host
+    sanitized_url = urlunsplit(
+        (parsed.scheme.lower(), sanitized_netloc, parsed.path or "/", "", "")
+    )
+    response_line, response_headers = _headers(value.get("responseHeader"))
+    raw_status = value.get("responseStatusCode")
+    if raw_status is None:
+        response_parts = response_line.split(" ", 2)
+        raw_status = response_parts[1] if len(response_parts) > 1 else None
+    try:
+        status = int(raw_status) if raw_status is not None else None
+    except (TypeError, ValueError):
+        status = None
+    request_content_type = request_headers.get("content-type")
+    response_content_type = response_headers.get("content-type")
+    if response_content_type:
+        response_content_type = response_content_type.split(";", 1)[0].strip().lower()
+    return CrawledEndpoint(
+        url=sanitized_url,
+        scheme=parsed.scheme,
+        host=parsed.hostname,
+        port=port,
+        path=parsed.path or "/",
+        query_parameter_names=query_names,
+        method=method,
+        status=status,
+        content_type=response_content_type,
+        body_parameter_names=_body_parameter_names(value.get("requestBody"), request_content_type),
+        source="zap_proxy",
+    )
+
+
+async def begin_proxy_capture(
+    target: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    requester: ZapRequester | None = None,
+) -> dict[str, Any]:
+    """Create an opaque, short-lived boundary in the global ZAP message history."""
+
+    _validate_target(target)
+    target_origin = _origin(target)[0]
+    _prune_captures()
+    if len(_CAPTURES) >= MAX_OPEN_CAPTURES:
+        raise ToolError("E_TOOL_FAILED", "ZAP proxy capture capacity was reached")
+    configured_url, configured_key = _configuration(base_url, api_key)
+    async with _ZapClient(
+        configured_url, configured_key, http_client=http_client, requester=requester
+    ) as client:
+        start_message_index = await _message_count(client)
+    _prune_captures()
+    if len(_CAPTURES) >= MAX_OPEN_CAPTURES:
+        raise ToolError("E_TOOL_FAILED", "ZAP proxy capture capacity was reached")
+    capture_ref = _capture_ref()
+    expires_at = datetime.now(UTC) + timedelta(seconds=CAPTURE_TTL_SECONDS)
+    _CAPTURES[capture_ref] = _CaptureBoundary(
+        target_origin=target_origin,
+        start_message_index=start_message_index,
+        expires_at_monotonic=time.monotonic() + CAPTURE_TTL_SECONDS,
+        expires_at=expires_at,
+    )
+    result = ProxyCaptureBoundaryResult(
+        target=target_origin,
+        capture_ref=capture_ref,
+        expires_at=expires_at,
+    )
+    return envelope("ZAP proxy capture boundary created", result.model_dump(mode="json"), False)
+
+
+async def collect_proxy_traffic(
+    target: str,
+    capture_ref: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    requester: ZapRequester | None = None,
+) -> dict[str, Any]:
+    """Collect and sanitize proxy traffic already observed after a capture boundary."""
+
+    _validate_target(target)
+    target_origin = _origin(target)[0]
+    if not re.fullmatch(r"ZCAP-[a-f0-9]{32}", capture_ref):
+        raise ToolError("E_INVALID_ARGUMENT", "ZAP proxy capture reference is invalid")
+    _prune_captures()
+    boundary = _CAPTURES.get(capture_ref)
+    if boundary is None:
+        raise ToolError("E_INVALID_ARGUMENT", "ZAP proxy capture reference is unknown or expired")
+    if not _same_origin(boundary.target_origin, target_origin):
+        raise ToolError("E_SCOPE", "ZAP proxy capture target does not match its boundary")
+    boundary = _CAPTURES.pop(capture_ref)
+    retryable = True
+    try:
+        configured_url, configured_key = _configuration(base_url, api_key)
+        async with _ZapClient(
+            configured_url, configured_key, http_client=http_client, requester=requester
+        ) as client:
+            end_message_index = await _message_count(client)
+            if end_message_index < boundary.start_message_index:
+                retryable = False
+                raise ToolError(
+                    "E_INVALID_ARGUMENT", "ZAP message history was reset during capture"
+                )
+            range_size = end_message_index - boundary.start_message_index
+            fetch_count = min(range_size, MAX_PROXY_MESSAGES)
+            raw_messages: list[Any] = []
+            offset = boundary.start_message_index
+            while len(raw_messages) < fetch_count:
+                page_size = min(PROXY_MESSAGE_PAGE_SIZE, fetch_count - len(raw_messages))
+                response = await client.get(
+                    "/JSON/core/view/messages/",
+                    {"start": str(offset), "count": str(page_size)},
+                )
+                page = response.get("messages")
+                if not isinstance(page, list):
+                    raise ToolError("E_PARSE", "ZAP messages response was invalid")
+                if not page:
+                    break
+                raw_messages.extend(page[:page_size])
+                offset += len(page[:page_size])
+                if len(page) < page_size:
+                    break
+    except BaseException:
+        if retryable and boundary.expires_at_monotonic > time.monotonic():
+            _CAPTURES.setdefault(capture_ref, boundary)
+        raise
+
+    messages: list[CrawledEndpoint] = []
+    excluded_message_count = 0
+    for raw_message in raw_messages:
+        message = _proxy_message(raw_message, target=target_origin)
+        if message is None:
+            excluded_message_count += 1
+        else:
+            messages.append(message)
+    missing_fetched_messages = max(fetch_count - len(raw_messages), 0)
+    dropped_message_count = max(range_size - MAX_PROXY_MESSAGES, 0) + missing_fetched_messages
+    truncated = dropped_message_count > 0
+    sanitized_text = json.dumps(
+        [message.model_dump(mode="json") for message in messages],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    artifact_ref = f"zap-proxy-{hashlib.sha256(sanitized_text.encode()).hexdigest()[:16]}"
+    result = ProxyTrafficResult(
+        target=target_origin,
+        capture_ref=capture_ref,
+        completed=True,
+        messages=messages,
+        captured_message_count=len(messages),
+        excluded_message_count=excluded_message_count,
+        dropped_message_count=dropped_message_count,
+        artifact_manifests=[
+            {
+                "artifact_ref": artifact_ref,
+                "artifact_type": "WEB_SCAN_RESULT",
+                "content": sanitized_text,
+                "media_type": "application/json",
+                "redaction_applied": True,
+                "truncated": truncated,
+                "metadata": {
+                    "capture_ref": capture_ref,
+                    "excluded_message_count": excluded_message_count,
+                    "dropped_message_count": dropped_message_count,
+                },
+            }
+        ],
+    )
+    return envelope(
+        f"ZAP proxy capture collected {len(messages)} in-scope messages",
+        result.model_dump(mode="json"),
+        truncated,
+    )
 
 
 async def _new_context(client: _ZapClient, target: str) -> str:
@@ -223,7 +589,7 @@ async def _remove_context(client: _ZapClient, context_name: str) -> None:
         return
 
 
-async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[str], str]:
+async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[Any], str]:
     context_name = await _new_context(client, target)
     try:
         response = await client.get(
@@ -247,8 +613,7 @@ async def _run_spider(client: _ZapClient, target: str) -> tuple[bool, list[str],
             await asyncio.sleep(ZAP_POLL_SECONDS)
         result = await client.get("/JSON/spider/view/results/", {"scanId": scan_id})
         raw_urls = result.get("results", [])
-        urls = [item.url for item in parse_spider_urls(raw_urls, target=target)]
-        return True, sorted(set(urls)), context_name
+        return True, raw_urls if isinstance(raw_urls, list) else [], context_name
     except BaseException:
         await _remove_context(client, context_name)
         raise
@@ -271,7 +636,21 @@ async def crawl_web(
         await _remove_context(client, context_name)
     endpoints = parse_spider_urls(urls, target=target)
     truncated = len(endpoints) > MAX_ENDPOINTS
-    result = CrawlResult(target=target, completed=completed, endpoints=endpoints[:MAX_ENDPOINTS])
+    raw_text = json.dumps(urls, sort_keys=True, separators=(",", ":"), default=str)
+    result = CrawlResult(
+        target=target,
+        completed=completed,
+        endpoints=endpoints[:MAX_ENDPOINTS],
+        artifact_manifests=[
+            {
+                "artifact_ref": f"zap-crawl-{hashlib.sha256(raw_text.encode()).hexdigest()[:16]}",
+                "artifact_type": "WEB_SCAN_RESULT",
+                "content": raw_text,
+                "media_type": "application/json",
+                "redaction_applied": True,
+            }
+        ],
+    )
     return envelope(
         f"ZAP discovered {len(result.endpoints)} endpoints on {target}",
         result.model_dump(mode="json"),

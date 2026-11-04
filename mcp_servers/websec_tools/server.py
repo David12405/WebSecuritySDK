@@ -56,6 +56,27 @@ async def get_response_headers(target: str) -> dict[str, Any]:
     return await _invoke(probes.get_response_headers, target)
 
 
+async def probe_http(
+    target: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
+) -> dict[str, Any]:
+    """Collect one bounded, redacted HTTP exchange."""
+
+    return await _invoke(probes.probe_http, target, method, headers, body)
+
+
+async def explore_browser(
+    target: str,
+    actions: list[dict[str, Any]] | None = None,
+    auth_ref: str | None = None,
+) -> dict[str, Any]:
+    """Explore a target through bounded declarative browser actions."""
+
+    return await _invoke(recon_tools.browser.explore_browser, target, actions, auth_ref)
+
+
 async def get_cookies(target: str) -> dict[str, Any]:
     """Return cookie metadata without returning cookie values."""
 
@@ -94,6 +115,18 @@ async def crawl_web(target: str) -> dict[str, Any]:
     """Crawl same-origin URLs using ZAP traditional Spider."""
 
     return await _invoke(recon_tools.zap.crawl_web, target)
+
+
+async def begin_proxy_capture(target: str) -> dict[str, Any]:
+    """Create an opaque boundary for traffic observed by the configured ZAP proxy."""
+
+    return await _invoke(recon_tools.zap.begin_proxy_capture, target)
+
+
+async def collect_proxy_traffic(target: str, capture_ref: str) -> dict[str, Any]:
+    """Collect sanitized ZAP proxy traffic for one opaque capture boundary."""
+
+    return await _invoke(recon_tools.zap.collect_proxy_traffic, target, capture_ref)
 
 
 async def passive_web_analysis(target: str) -> dict[str, Any]:
@@ -155,12 +188,15 @@ async def analyze_source(target: str, path: str = ".") -> dict[str, Any]:
 
 
 TOOLS = (
+    probe_http,
     get_response_headers,
     get_cookies,
     get_tls_info,
     get_cors_policy,
     discover_hosts,
     discover_services,
+    begin_proxy_capture,
+    collect_proxy_traffic,
     crawl_web,
     passive_web_analysis,
     fingerprint_web,
@@ -169,6 +205,7 @@ TOOLS = (
     read_source_file,
     search_source,
     analyze_source,
+    explore_browser,
 )
 
 

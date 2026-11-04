@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .memory.target_store import TargetStore
 from .policy.scope_guard import ScopeEntry, normalize_scope
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +49,30 @@ class Settings:
     strict one. Zero by default for the same reason steering is
     deterministic."""
 
+    use_judge: bool = False
+    """Run the model-judged steering rule as well as the deterministic ones.
+
+    It catches the one thing string matching cannot - a finding whose
+    evidence is real and does not support it - and on the parked
+    `fingerprint` check it caught exactly that, twice out of two runs,
+    naming the finding that rested on a page title.
+
+    **Off by default because it is measurably harmful on the checks whose
+    answers were already correct.** On `headers` it argued severity on all
+    four findings and invented a premise to justify it ("the site handles
+    credentials or sessions", of a target with no forms and no cookies);
+    hiding severity from it stopped that and it then pressured the model
+    into merging four specific findings into one vague one. Three rounds of
+    narrowing its remit moved the noise rather than removing it.
+
+    So it is a tool for a check that needs judgement, not a default. The
+    deterministic rules run either way, and the judge can only add issues,
+    never clear one - turning it on cannot loosen a boundary, only spend
+    model calls and risk a worse answer."""
+
+    assessment_id: str | None = None
+    target_store: TargetStore | None = None
+
     _entries: list[ScopeEntry] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -59,6 +84,8 @@ class Settings:
         # Parses and validates now, so a malformed scope is the caller's
         # error at construction rather than a confusing block mid-run.
         self._entries = normalize_scope(self.scope)
+        if (self.assessment_id is None) != (self.target_store is None):
+            raise ValueError("assessment_id and target_store must be provided together")
 
     @property
     def entries(self) -> list[ScopeEntry]:

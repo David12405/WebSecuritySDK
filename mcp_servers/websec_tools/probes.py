@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
+import json
 import math
 import re
 import socket
@@ -11,7 +13,7 @@ import ssl
 from datetime import UTC, datetime
 from http.cookies import SimpleCookie
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import httpx
 from cryptography import x509
@@ -33,9 +35,7 @@ SECURITY_HEADERS = (
     "x-frame-options",
     "x-content-type-options",
 )
-SENSITIVE_HEADERS = frozenset(
-    {"set-cookie", "authorization", "proxy-authorization", "x-api-key"}
-)
+SENSITIVE_HEADERS = frozenset({"set-cookie", "authorization", "proxy-authorization", "x-api-key"})
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
@@ -61,6 +61,111 @@ class ResponseHeadersResult(BaseModel):
     redacted_headers: list[str]
     security_headers_present: list[str]
     security_headers_missing: list[str]
+
+
+class HTTPProbeResult(BaseModel):
+    """Bounded, redacted HTTP exchange suitable for later evidence processing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    method: str
+    final_url: str
+    status: int
+    http_version: str
+    redirects: list[RedirectHop]
+    request_headers: dict[str, str]
+    response_headers: dict[str, str]
+    request_content_type: str | None = None
+    response_content_type: str | None = None
+    request_parameter_names: list[str] = Field(default_factory=list)
+    response_body_size: int = Field(ge=0)
+    response_body_text: str | None = None
+    body_truncated: bool = False
+    redacted_headers: list[str] = Field(default_factory=list)
+    artifact_manifests: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _redact_request_headers(headers: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    output: dict[str, str] = {}
+    redacted: list[str] = []
+    for name, value in headers.items():
+        normalized = name.lower()
+        if normalized in SENSITIVE_HEADERS or any(
+            part in normalized
+            for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
+        ):
+            output[normalized] = "<redacted>"
+            redacted.append(normalized)
+        else:
+            output[normalized], _ = _cap(value)
+    return output, sorted(set(redacted))
+
+
+def _header_value(headers: dict[str, str], name: str) -> str | None:
+    """Read caller-provided headers case-insensitively."""
+
+    wanted = name.casefold()
+    for key, value in headers.items():
+        if key.casefold() == wanted:
+            return value
+    return None
+
+
+def _body_parameter_names(body: str | bytes | None, content_type: str | None) -> list[str]:
+    if body is None:
+        return []
+    text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
+    if content_type and "json" in content_type.lower():
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(value, dict):
+            return sorted(str(key) for key in value)
+    if content_type and "x-www-form-urlencoded" in content_type.lower():
+        return sorted({key for key, _value in parse_qsl(text, keep_blank_values=True)})
+    return []
+
+
+_SENSITIVE_BODY_KEYS = (
+    "authorization",
+    "cookie",
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+)
+
+
+def _redact_body_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                "<redacted>"
+                if any(part in str(key).casefold() for part in _SENSITIVE_BODY_KEYS)
+                else _redact_body_value(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_body_value(item) for item in value]
+    return value
+
+
+def _redact_body_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return re.sub(
+            r"(?i)(password|authorization|cookie|secret|token|api[-_]?key)(\s*[:=]\s*)([^&\s,;]+)",
+            r"\1\2<redacted>",
+            value,
+        )
+    return json.dumps(_redact_body_value(parsed), sort_keys=True, separators=(",", ":"))
 
 
 class CookieMetadata(BaseModel):
@@ -168,7 +273,10 @@ def _header_map(response: httpx.Response) -> tuple[dict[str, str], bool]:
     prioritized.extend(item for item in items if item[0].lower() not in security_names)
     for name, value in prioritized[:MAX_HEADERS]:
         normalized = name.lower()
-        if normalized in SENSITIVE_HEADERS:
+        if normalized in SENSITIVE_HEADERS or any(
+            part in normalized
+            for part in ("token", "secret", "password", "cookie", "api-key", "api_key")
+        ):
             output[normalized] = "<redacted>"
             continue
         capped, was_truncated = _cap(value)
@@ -182,14 +290,21 @@ async def _fetch(
     target: str,
     method: str = "GET",
     headers: dict[str, str] | None = None,
+    body: str | bytes | None = None,
 ) -> tuple[httpx.Response, list[dict[str, Any]]]:
     _validate_target(target)
     current = target
+    current_method = method
+    current_body = body
     chain: list[dict[str, Any]] = []
     for _ in range(MAX_REDIRECTS + 1):
         try:
             response = await client.request(
-                method, current, headers=headers or {}, follow_redirects=False
+                current_method,
+                current,
+                headers=headers or {},
+                content=current_body,
+                follow_redirects=False,
             )
         except httpx.TimeoutException as exc:
             raise ProbeError(
@@ -209,8 +324,26 @@ async def _fetch(
             raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects")
         next_target = urljoin(current, location)
         _validate_target(next_target)
+        current_parts = urlsplit(current)
+        next_parts = urlsplit(next_target)
+        same_origin = (
+            current_parts.scheme.lower() == next_parts.scheme.lower()
+            and (current_parts.hostname or "").rstrip(".").lower()
+            == (next_parts.hostname or "").rstrip(".").lower()
+            and (current_parts.port or (443 if current_parts.scheme == "https" else 80))
+            == (next_parts.port or (443 if next_parts.scheme == "https" else 80))
+        )
+        if current_parts.scheme == "https" and next_parts.scheme == "http":
+            raise ProbeError("E_SCOPE", "redirect would downgrade HTTPS to HTTP")
+        if not same_origin:
+            raise ProbeError("E_SCOPE", "redirect destination is outside the initial origin")
         chain.append({"from": current, "to": next_target, "status": response.status_code})
         current = next_target
+        if response.status_code == 303 or (
+            response.status_code in {301, 302} and current_method == "POST"
+        ):
+            current_method = "GET"
+            current_body = None
     raise ProbeError("E_REDIRECT_LOOP", f"more than {MAX_REDIRECTS} redirects")
 
 
@@ -240,9 +373,7 @@ async def get_response_headers(
             http_version=response.http_version,
             redirects=redirects,
             headers=headers,
-            redacted_headers=sorted(
-                name for name in SENSITIVE_HEADERS if name in response.headers
-            ),
+            redacted_headers=sorted(name for name in SENSITIVE_HEADERS if name in response.headers),
             security_headers_present=present,
             security_headers_missing=missing,
         )
@@ -250,6 +381,68 @@ async def get_response_headers(
             summary,
             result.model_dump(mode="json", by_alias=True),
             truncated,
+        )
+    finally:
+        if owned:
+            await http.aclose()
+
+
+async def probe_http(
+    target: str,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Collect one bounded, redacted HTTP exchange for Module 1."""
+    method = method.upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}:
+        raise ProbeError("E_INVALID_ARGUMENT", "HTTP method is not allowed")
+    http, owned = _client_or_default(client)
+    try:
+        response, redirects = await _fetch(http, target, method=method, headers=headers, body=body)
+        response_headers, header_truncated = _header_map(response)
+        request_headers, redacted = _redact_request_headers(headers or {})
+        content_type = response.headers.get("content-type")
+        body_bytes = response.content
+        bounded = body_bytes[:MAX_VALUE_LENGTH]
+        body_text = (
+            _redact_body_text(bounded.decode("utf-8", errors="replace")) if bounded else None
+        )
+        request_content_type = _header_value(headers or {}, "content-type")
+        result = HTTPProbeResult(
+            target=target,
+            method=method,
+            final_url=str(response.url),
+            status=response.status_code,
+            http_version=response.http_version,
+            redirects=redirects,
+            request_headers=request_headers,
+            response_headers=response_headers,
+            request_content_type=request_content_type,
+            response_content_type=content_type,
+            request_parameter_names=_body_parameter_names(body, request_content_type),
+            response_body_size=len(body_bytes),
+            response_body_text=body_text,
+            body_truncated=len(body_bytes) > len(bounded),
+            redacted_headers=redacted
+            + [name for name in SENSITIVE_HEADERS if name in response.headers],
+        )
+        exchange = json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        artifact_ref = f"http-exchange-{hashlib.sha256(exchange.encode()).hexdigest()[:16]}"
+        result.artifact_manifests = [
+            {
+                "artifact_ref": artifact_ref,
+                "artifact_type": "HTTP_RAW_EXCHANGE",
+                "content": exchange,
+                "media_type": "application/json",
+                "redaction_applied": True,
+            }
+        ]
+        return envelope(
+            f"{method} {response.status_code} {response.url}",
+            result.model_dump(mode="json", by_alias=True),
+            header_truncated or result.body_truncated,
         )
     finally:
         if owned:

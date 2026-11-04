@@ -91,6 +91,20 @@ class TraceCollector:
     and reporting are different jobs; only the second one is configurable.
     """
 
+    tools_seen: set[str] = field(default_factory=set)
+    """Names of the tools that ran successfully, also before the filter.
+
+    Separate from `measured` because "did you call the tool the check needs"
+    is a different question from "did you measure anything", and a check
+    declaring two tools can satisfy the second while failing the first.
+
+    Recorded here rather than read back from `steps` for the reason above:
+    a rule that reads the filtered trace reports every tool missing under
+    `trace_level="off"`.
+    """
+
+    execution_refs: dict[str, str] = field(default_factory=dict)
+
     # -- writing ---------------------------------------------------------
 
     def record(
@@ -103,6 +117,7 @@ class TraceCollector:
         detail: str = "",
         code: str | None = None,
         duration_ms: int | None = None,
+        execution_ref: str | None = None,
     ) -> TraceStep | None:
         """Add a step, unless this kind is filtered out at this level.
 
@@ -121,6 +136,7 @@ class TraceCollector:
             detail=detail,
             code=code,
             duration_ms=duration_ms,
+            execution_ref=execution_ref,
         )
         self._next += 1
         self.steps.append(step)
@@ -178,6 +194,7 @@ class TraceCollector:
         text = _text_of(event.result) if failed else ""
         if not failed:
             self.measured += 1
+            self.tools_seen.add(name)
         self.record(
             "tool_call",
             name=name,
@@ -187,6 +204,7 @@ class TraceCollector:
             summary=message_of(text) if failed else "completed",
             code=code_of(text) if failed else None,
             duration_ms=duration,
+            execution_ref=self.execution_refs.get(event.tool_use.get("toolUseId") or ""),
         )
 
     def _after_model(self, event: AfterModelCallEvent) -> None:

@@ -10,7 +10,7 @@ import pytest
 from mcp_servers.websec_tools.errors import ToolError
 
 _runner_spec = importlib.util.spec_from_file_location(
-    "l6_probe_target", Path(__file__).parents[1] / "examples" / "probe_target.py"
+    "l6_probe_target", Path(__file__).parents[2] / "examples" / "probe_target.py"
 )
 runner = importlib.util.module_from_spec(_runner_spec)
 assert _runner_spec.loader is not None

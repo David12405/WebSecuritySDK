@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-import pytest
-
 from _builders import draft, tool_step
 from websecuritycheck.results import CheckOutput, CheckResult, ErrorInfo, TraceStep
 from websecuritycheck.results.export import (
@@ -104,32 +102,34 @@ def test_rules_are_not_repeated_for_two_findings_of_one_kind() -> None:
     assert len({rule["id"] for rule in run["tool"]["driver"]["rules"]}) == 2  # distinct locations
 
 
-@pytest.mark.parametrize(
-    ("severity", "level", "score"),
-    [
-        ("critical", "error", "9.0"),
-        ("high", "error", "7.0"),
-        ("medium", "warning", "5.0"),
-        ("low", "note", "3.0"),
-        ("info", "note", "1.0"),
-    ],
-)
-def test_severity_maps_to_level_and_score(severity: str, level: str, score: str) -> None:
-    run = only_run(result(output=CheckOutput(findings=[draft(severity=severity)])))
-    assert run["results"][0]["level"] == level
-    assert run["tool"]["driver"]["rules"][0]["properties"]["security-severity"] == score
+def test_every_finding_is_reported_at_one_level() -> None:
+    """Findings carry no severity, so SARIF cannot claim one.
+
+    `warning` is SARIF's own default for a result whose rule says nothing,
+    so writing it states what would happen anyway rather than inventing a
+    rating on the way out of the door.
+    """
+    run = only_run(
+        result(
+            output=CheckOutput(
+                findings=[draft(title="a", location="x"), draft(title="b", location="y")]
+            )
+        )
+    )
+    assert {item["level"] for item in run["results"]} == {"warning"}
 
 
-def test_critical_and_high_stay_apart_despite_sharing_a_level() -> None:
-    """SARIF has four levels and we have five severities; the score keeps them distinct."""
-    high = only_run(result(output=CheckOutput(findings=[draft(severity="high")])))
-    critical = only_run(result(output=CheckOutput(findings=[draft(severity="critical")])))
-    assert high["results"][0]["level"] == critical["results"][0]["level"] == "error"
-    scores = [
-        run["tool"]["driver"]["rules"][0]["properties"]["security-severity"]
-        for run in (high, critical)
-    ]
-    assert scores == ["7.0", "9.0"]
+def test_sarif_claims_no_security_severity() -> None:
+    """The cost of having no severity, written down where it bites.
+
+    GitHub code scanning ranks alerts by this property. Without it every
+    alert sorts together and the reader does the triage - which is the
+    honest trade for not having guessed the numbers.
+    """
+    run = only_run(result(output=CheckOutput(findings=[draft()])))
+    properties = run["tool"]["driver"]["rules"][0]["properties"]
+    assert "security-severity" not in properties
+    assert properties["tags"][0] == "security"
 
 
 def test_location_carries_the_url_and_the_header_name() -> None:

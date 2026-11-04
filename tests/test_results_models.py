@@ -207,23 +207,43 @@ def test_diff_keeps_unverified_apart_from_fixed() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_findings_are_ordered_high_to_low() -> None:
+def test_findings_are_ordered_by_what_they_are_about() -> None:
+    """With no severity to rank by, the useful order groups a target's
+    findings about the same header or cookie together."""
     result = CheckResult.build(
         check="headers",
         target="https://example.com",
         output=CheckOutput(
             findings=[
-                draft(title="Server header discloses version", location="Server", severity="low"),
-                draft(title="HSTS missing", location="Strict-Transport-Security", severity="high"),
-                draft(title="No CSP", location="Content-Security-Policy", severity="critical"),
+                draft(title="Server header discloses version", location="Server"),
+                draft(title="HSTS missing", location="Strict-Transport-Security"),
+                draft(title="No CSP", location="Content-Security-Policy"),
             ]
         ),
         errors=[],
         trace=[tool_step()],
     )
-    assert [f.severity for f in result.findings] == ["critical", "high", "low"]
-    assert result.highest_severity == "critical"
+    assert [f.location for f in result.findings] == [
+        "Content-Security-Policy",
+        "Server",
+        "Strict-Transport-Security",
+    ]
     assert result.status == "issues_found"
+
+
+def test_a_finding_cannot_carry_a_severity() -> None:
+    """Removed rather than forbidden, the same move `status` gets.
+
+    Measured before it was dropped: severities moved between identical
+    runs, a reviewing model argued them on every finding and invented a
+    premise to justify itself, and the pressure to defend a rating pushed
+    four specific findings into one vague one.
+    """
+    properties = CheckOutput.model_json_schema()["$defs"]["FindingDraft"]["properties"]
+    assert "severity" not in properties
+
+    with pytest.raises(ValidationError):
+        FindingDraft.model_validate({**draft().model_dump(), "severity": "critical"})
 
 
 def test_tool_refs_follow_the_named_tool() -> None:
@@ -249,15 +269,23 @@ def test_tool_refs_fall_back_to_the_whole_run() -> None:
     assert result.findings[0].tool_refs == ["s1", "s2"]
 
 
-def test_by_severity_omits_empty_levels() -> None:
+def test_by_location_groups_what_a_reader_reads_together() -> None:
     result = CheckResult.build(
-        check="headers",
+        check="cookies",
         target="https://example.com",
-        output=CheckOutput(findings=[draft(severity="medium")]),
+        output=CheckOutput(
+            findings=[
+                draft(title="sid has no HttpOnly", location="sid"),
+                draft(title="sid has no Secure", location="sid"),
+                draft(title="_ga has no SameSite", location="_ga"),
+            ]
+        ),
         errors=[],
         trace=[tool_step()],
     )
-    assert list(result.by_severity()) == ["medium"]
+    grouped = result.by_location()
+    assert list(grouped) == ["_ga", "sid"]
+    assert len(grouped["sid"]) == 2
 
 
 # --------------------------------------------------------------------------

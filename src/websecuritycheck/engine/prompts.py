@@ -18,6 +18,8 @@ Four of them are worth the words:
 * report, do not advise - the schema has no `remediation` field, and this
   says why, so the model does not route the advice into `notes` instead.
   A field removed from a schema is a field a prompt can still invite.
+* do not rate - same shape as the rule above, and for the same reason: the
+  severity field is gone and the adjective can still land in a title.
 """
 
 from __future__ import annotations
@@ -70,6 +72,12 @@ outranks anything you remember about how sites like this usually behave.
    one target; you cannot see the stack behind it, so you do not know what
    changing it would break.
 
+7. **Do not rate.** There is no severity field, and no rating belongs in
+   `title` or `notes` either - not "critical", not "high risk", not "this
+   is the most serious issue". How much a problem matters depends on what
+   the target is for and what is behind it, and one response tells you
+   neither. Say what is true and let the reader weigh it.
+
 ## Your answer
 
 Fill the structured output: `findings` plus `notes`. Nothing else is yours
@@ -77,7 +85,6 @@ to decide - status, errors and the trace are the harness's. For each
 finding:
 
 * `title` - what is wrong, in one line
-* `severity` - what it exposes on THIS target, not a generic rating
 * `location` - the header, cookie or URL it is about, spelled as the tool
   spelled it
 * `evidence` - quoted from the tool result; not a restatement of the title

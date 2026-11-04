@@ -21,6 +21,7 @@ from pathlib import Path
 from .checks import base as checks
 from .config import Settings
 from .engine.runner import run_check
+from .memory.target_store import TargetStore
 from .results.models import CheckResult
 
 
@@ -37,6 +38,9 @@ class SecurityChecker:
         servers_config: str | Path | None = None,
         api_key: str | None = None,
         temperature: float = 0.0,
+        use_judge: bool = False,
+        assessment_id: str | None = None,
+        target_store: TargetStore | None = None,
     ) -> None:
         """Scope is required and is validated here.
 
@@ -54,6 +58,9 @@ class SecurityChecker:
             trace_level=trace_level,
             api_key=api_key,
             temperature=temperature,
+            use_judge=use_judge,
+            assessment_id=assessment_id,
+            target_store=target_store,
             **kwargs,
         )
 

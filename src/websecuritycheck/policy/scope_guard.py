@@ -24,6 +24,7 @@ rather than quietly matching nothing.
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -73,6 +74,8 @@ class ScopeEntry:
 
     @property
     def effective_port(self) -> int:
+        if self.scheme == "network":
+            return 0
         return self.port if self.port is not None else DEFAULT_PORTS[self.scheme]
 
 
@@ -93,6 +96,14 @@ def normalize_scope(scope: Iterable[str]) -> list[ScopeEntry]:
     for raw in scope:
         text = raw.strip()
         parts = urlsplit(text)
+        if not parts.scheme:
+            try:
+                network = ipaddress.ip_network(text, strict=False)
+            except ValueError:
+                network = None
+            if network is not None:
+                entries.append(ScopeEntry(scheme="network", host=str(network), port=None, path=""))
+                continue
         if not parts.scheme:
             raise ValueError(f"scope entry {raw!r} has no scheme; write 'https://{text}'")
         if parts.scheme not in ALLOWED_SCHEMES:
@@ -142,7 +153,29 @@ def in_scope(
     if not entries:
         return ScopeDecision(False, "the scope is empty, so no target is in scope", rule=6)
 
-    parts = urlsplit(target.strip())
+    raw_target = target.strip()
+    parts = urlsplit(raw_target)
+
+    if not parts.scheme:
+        network_entries = [entry for entry in entries if entry.scheme == "network"]
+        if not network_entries:
+            return ScopeDecision(
+                False, f"target {_quote(raw_target)!r} has no HTTP(S) scheme", rule=1
+            )
+        try:
+            target_network = ipaddress.ip_network(raw_target, strict=False)
+        except ValueError:
+            target_network = None
+        for entry in network_entries:
+            try:
+                scope_network = ipaddress.ip_network(entry.host, strict=False)
+            except ValueError:
+                continue
+            if target_network is not None and target_network.subnet_of(scope_network):
+                return ALLOWED
+        return ScopeDecision(
+            False, f"network target {_quote(raw_target)!r} is not in scope", rule=2
+        )
 
     # Rule 1. Decided here rather than left to the tool: the guard makes the
     # decision, so it must not depend on something else validating first.

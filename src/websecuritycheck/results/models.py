@@ -21,7 +21,6 @@ blocked, which failed, which answers were sent back. Without it
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Sequence
 from datetime import datetime
@@ -29,23 +28,25 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..identity import stable_hash
+
 # --------------------------------------------------------------------------
 # Vocabularies
 # --------------------------------------------------------------------------
 
-Severity = Literal["info", "low", "medium", "high", "critical"]
+#: **There is no severity.** A finding says what the target does and where;
+#: how much it matters is not something one response can settle, and a model
+#: asked to rate it will answer anyway. Measured on this project: severities
+#: moved between identical runs, a reviewing model argued them on every
+#: finding and invented a premise to justify itself, and the pressure to
+#: defend a rating pushed four specific findings into one vague one.
+#:
+#: Dropping the field removes the question rather than forbidding it - the
+#: same move `CheckOutput` makes with `status`. Whoever reads the report
+#: knows their own system and can rank what it says; the SDK knows one
+#: response.
 
-#: High-to-low ordering for reports. A report that lists a cookie note above a
-#: missing HSTS header buries the thing the reader opened it for.
-SEVERITY_RANK: dict[Severity, int] = {
-    "critical": 4,
-    "high": 3,
-    "medium": 2,
-    "low": 1,
-    "info": 0,
-}
-
-ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection"]
+ErrorKind = Literal["scope", "tool", "model", "validation", "timeout", "injection", "storage"]
 
 Status = Literal["passed", "issues_found", "failed", "partial"]
 
@@ -100,7 +101,6 @@ class FindingDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1)
-    severity: Severity
     location: str = Field(min_length=1, description="URL, header name, cookie name ...")
     evidence: str = Field(
         min_length=1,
@@ -140,7 +140,7 @@ def slug(text: str) -> str:
     return _SLUG.sub("-", text.lower()).strip("-")
 
 
-def stable_id(check: str, location: str, title: str) -> str:
+def stable_finding_id(check: str, location: str, title: str) -> str:
     """A finding id that survives between runs, so two runs can be diffed.
 
     Derived from what the finding is *about* rather than from how it was
@@ -154,7 +154,13 @@ def stable_id(check: str, location: str, title: str) -> str:
     rule ids, this becomes `check:rule:location` and the problem disappears.
     """
     key = f"{slug(check)}|{location.strip().lower()}|{slug(title)}"
-    return hashlib.sha256(key.encode()).hexdigest()[:12]
+    return stable_hash(key)
+
+
+def stable_id(check: str, location: str, title: str) -> str:
+    """Backward-compatible alias for stable_finding_id."""
+
+    return stable_finding_id(check, location, title)
 
 
 class Finding(FindingDraft):
@@ -170,13 +176,9 @@ class Finding(FindingDraft):
     def from_draft(cls, draft: FindingDraft, check: str, tool_refs: Sequence[str]) -> Finding:
         return cls(
             **draft.model_dump(),
-            id=stable_id(check, draft.location, draft.title),
+            id=stable_finding_id(check, draft.location, draft.title),
             tool_refs=list(tool_refs),
         )
-
-    @property
-    def rank(self) -> int:
-        return SEVERITY_RANK[self.severity]
 
 
 class ErrorInfo(BaseModel):
@@ -194,6 +196,7 @@ class ErrorInfo(BaseModel):
         default=None,
         description="Trace step this error came from, when it came from one.",
     )
+    execution_ref: str | None = None
 
 
 class TraceStep(BaseModel):
@@ -213,6 +216,7 @@ class TraceStep(BaseModel):
     detail: str = ""
     code: str | None = None
     duration_ms: int | None = None
+    execution_ref: str | None = None
 
     @field_validator("summary", "detail")
     @classmethod
@@ -369,7 +373,10 @@ class CheckResult(BaseModel):
             Finding.from_draft(draft, check, _refs_for(draft, tool_steps))
             for draft in output.findings
         ]
-        findings.sort(key=lambda f: (-f.rank, f.location, f.title))
+        # By location, then title. With no severity to rank by, the useful
+        # order is the one that puts a target's findings about the same
+        # header or cookie next to each other.
+        findings.sort(key=lambda f: (f.location, f.title))
 
         if measured == 0 and NO_TOOL_RAN not in errors:
             errors.append(NO_TOOL_RAN)
@@ -389,15 +396,11 @@ class CheckResult(BaseModel):
             tools_ran=measured,
         )
 
-    @property
-    def highest_severity(self) -> Severity | None:
-        return self.findings[0].severity if self.findings else None
-
-    def by_severity(self) -> dict[Severity, list[Finding]]:
-        """Findings grouped for a report, high to low, empty levels omitted."""
-        grouped: dict[Severity, list[Finding]] = {}
+    def by_location(self) -> dict[str, list[Finding]]:
+        """Findings grouped for a report, by what they are about."""
+        grouped: dict[str, list[Finding]] = {}
         for finding in self.findings:
-            grouped.setdefault(finding.severity, []).append(finding)
+            grouped.setdefault(finding.location, []).append(finding)
         return grouped
 
 

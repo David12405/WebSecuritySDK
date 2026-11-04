@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 STABLE_ERROR_CODES = frozenset(
     {
         "E_INVALID_TARGET",
@@ -20,6 +19,7 @@ STABLE_ERROR_CODES = frozenset(
         "E_TOOL_FAILED",
         "E_PARSE",
         "E_UNSUPPORTED_INPUT",
+        "E_SCOPE",
     }
 )
 
@@ -55,4 +55,3 @@ def safe_message(exc: BaseException, fallback: str = "tool failed") -> str:
     if not message:
         return fallback
     return message[:256]
-
