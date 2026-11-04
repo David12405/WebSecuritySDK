@@ -133,6 +133,10 @@ saying why rather than by putting a word on it.
   report by accident. `value_length: 352` is evidence; the value is not.
 - One finding per cookie per problem. Three cookies missing `HttpOnly` is
   three findings, not one that lists them.
+- `rule` is the attribute the problem is about, lowercase — `secure`,
+  `httponly`, `samesite`, `expiry`, `scope`. It is what tells two findings on
+  the same cookie apart, and the finding's identity across runs, so keep it
+  identical every time even as you reword the title.
 - A tool failure is an error, never a finding.
 - Report, do not advise. Name the attribute that is missing and what its
   absence allows. Do not write the `Set-Cookie` line they should send: you

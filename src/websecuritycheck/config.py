@@ -40,6 +40,14 @@ class Settings:
     servers_config: Path = DEFAULT_SERVERS
     """Which MCP servers to connect to."""
 
+    history_db: Path | None = None
+    """Where to keep the run history, or None for a run that remembers nothing.
+
+    Opt-in on purpose: a diff needs a baseline to compare against, and a
+    developer who has not asked to persist runs should not find a database
+    appearing in their working directory. When set, each run is recorded and
+    diffed against the last run of the same check on the same target."""
+
     api_key: str | None = None
     """Normally unset: each provider SDK reads its own environment variable.
     Present for a demo where passing one explicitly is simpler."""

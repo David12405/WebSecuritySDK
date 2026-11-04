@@ -39,6 +39,7 @@ class SecurityChecker:
         api_key: str | None = None,
         temperature: float = 0.0,
         use_judge: bool = False,
+        history_db: str | Path | None = None,
         assessment_id: str | None = None,
         target_store: TargetStore | None = None,
     ) -> None:
@@ -51,6 +52,8 @@ class SecurityChecker:
         kwargs = {}
         if servers_config is not None:
             kwargs["servers_config"] = Path(servers_config)
+        if history_db is not None:
+            kwargs["history_db"] = Path(history_db)
         self.settings = Settings(
             model=model,
             scope=list(scope),

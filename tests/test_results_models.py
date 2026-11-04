@@ -189,6 +189,30 @@ def test_stable_id_separates_two_findings_on_one_location() -> None:
     assert a != b
 
 
+def test_the_rule_is_the_identity_so_a_reworded_title_keeps_the_id() -> None:
+    """The real bug: at temperature 0 the model still rewords the title between
+    runs, and the id must not move with it. With `rule` set, it does not."""
+    run1 = stable_id("headers", "x-frame-options", "No X-Frame-Options header, so clickjacking",
+                     "x-frame-options")
+    run2 = stable_id("headers", "x-frame-options", "No X-Frame-Options, so clickjacking attacks",
+                     "x-frame-options")
+    assert run1 == run2
+
+
+def test_the_rule_separates_two_problems_on_one_cookie() -> None:
+    """A cookie missing both Secure and HttpOnly is two findings, same location."""
+    secure = stable_id("cookies", "sid", "sid is sent without Secure", "secure")
+    httponly = stable_id("cookies", "sid", "sid is readable by JavaScript", "httponly")
+    assert secure != httponly
+
+
+def test_stable_id_falls_back_to_the_title_without_a_rule() -> None:
+    """No rule -> the old check|location|title key, so nothing regresses."""
+    with_empty = stable_id("headers", "csp", "CSP missing", "")
+    without = stable_id("headers", "csp", "CSP missing")
+    assert with_empty == without
+
+
 def test_same_finding_from_two_runs_gets_one_id() -> None:
     first = Finding.from_draft(draft(), "headers", ["s1"])
     second = Finding.from_draft(draft(), "headers", ["s4"])

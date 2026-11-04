@@ -295,6 +295,17 @@ def _from_judge(issue: JudgeIssue) -> SteeringIssue:
     )
 
 
+def error_code(rule: str) -> str:
+    """The `E_*` code for a rule that survived every round.
+
+    Judge rules arrive as `judge:follows`, and an `E_*` code is letters,
+    digits and underscores everywhere else - including SARIF descriptor
+    ids - so anything else becomes an underscore rather than leaking
+    through.
+    """
+    return "E_STEERING_" + re.sub(r"[^A-Z0-9]", "_", rule.upper())
+
+
 def message_for(issues: Sequence[SteeringIssue]) -> str:
     """The turn sent back to the model.
 
@@ -319,8 +330,7 @@ def message_for(issues: Sequence[SteeringIssue]) -> str:
         "cannot quote a tool result for.",
         "",
         "Change only what the points above require. Every other field keeps the "
-        "value you already gave it - severities especially. You judged those "
-        "against the skill with the tool result in front of you, and nothing "
-        "above is a reason to revisit them.",
+        "value you already gave it: you wrote those with the tool result in "
+        "front of you, and nothing above is a reason to revisit them.",
     ]
     return "\n".join(lines)

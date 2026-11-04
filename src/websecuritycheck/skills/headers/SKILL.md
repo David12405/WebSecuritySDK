@@ -127,6 +127,10 @@ their target is for; say what is true and let them weigh it.
   A missing header is still quotable: the probe lists it in
   `security_headers_missing`, and that list *is* the measurement.
 - `location` is the header name, exactly as the tool spelled it.
+- `rule` is the header name too, lowercase — `x-frame-options`,
+  `content-security-policy`, `strict-transport-security`,
+  `x-content-type-options`. It is the finding's identity across runs, so keep
+  it identical every time; the title may be worded freely, `rule` may not.
 - A tool failure is an error, never a finding.
 - If the result says `truncated: true`, say so rather than concluding from a
   partial list.

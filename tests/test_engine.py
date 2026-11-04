@@ -472,3 +472,58 @@ def test_the_duration_is_carried() -> None:
     trace = TraceCollector()
     trace._after_tool(after_event())
     assert trace.steps[0].duration_ms == 500
+
+
+# --------------------------------------------------------------------------
+# Steering rounds in the trace
+# --------------------------------------------------------------------------
+
+
+def test_a_revised_answer_is_its_own_output_step() -> None:
+    """The trace must show when the answer changed, not only that it was sent back.
+
+    A reader following a `partial` sees the steering steps; without an
+    `output` step per revision they can never tell which answer the run
+    actually kept, or how long the revision took.
+    """
+    from types import SimpleNamespace
+
+    from websecuritycheck.checks import Check
+    from websecuritycheck.engine.runner import _steer
+    from websecuritycheck.policy.injection_guard import InjectionGuard
+
+    check = Check(
+        name="steer-probe",
+        task="t",
+        tools=("get_tls_info",),
+        required_coverage={"expiry": []},
+        required_tools=(),  # the fake agent calls no tool; coverage is the rule under test
+    )
+
+    class FakeAgent:
+        """Answers the steering round with the topic covered."""
+
+        def __call__(self, prompt: str, limits: dict | None = None) -> Any:
+            return SimpleNamespace(
+                structured_output=CheckOutput(notes="expiry: not_after is months away"),
+                stop_reason="end_turn",
+            )
+
+    trace = TraceCollector()
+    errors: list = []
+    output = _steer(
+        FakeAgent(),
+        CheckOutput(),  # says nothing about expiry -> one coverage issue
+        check,
+        InjectionGuard(output_tool="CheckOutput"),
+        trace,
+        errors,
+        Settings(model="openai:gpt-4o-mini", scope=["https://example.com"]),
+        model=None,
+    )
+
+    assert "expiry" in output.notes
+    assert errors == []
+    kinds = [(step.kind, step.name) for step in trace.steps]
+    assert ("steering", "coverage") in kinds
+    assert ("output", "CheckOutput") in kinds

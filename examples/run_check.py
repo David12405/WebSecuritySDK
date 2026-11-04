@@ -1,26 +1,16 @@
-"""One full agent run.  Needs model credentials.
 
-    python examples/run_check.py https://example.com
-    python examples/run_check.py https://example.com --check headers --trace full
-    python examples/run_check.py https://example.com --json report.json --sarif report.sarif
-
-The whole turn diagram end to end: the public API validates the scope, the
-runner builds an agent from the `Check`, the MCP server comes up, the policy
-hooks ride along, and a typed `CheckResult` comes back - for a caller who
-wrote no prompt and imported no agent framework.
-
-Reads `.env` for `OPENAI_API_KEY` so the demo is one command.
-"""
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import textwrap
 from pathlib import Path
 
 from websecuritycheck import SecurityChecker
+from websecuritycheck.memory.target_store import SQLiteTargetStore
 from websecuritycheck.results.export import summary_line, write_json, write_sarif
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -67,12 +57,44 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--json", dest="json_path", help="write the result as JSON")
     parser.add_argument("--sarif", dest="sarif_path", help="write the result as SARIF 2.1.0")
+    parser.add_argument(
+        "--history",
+        dest="history_db",
+        help="SQLite path to record runs in and diff against; run twice to see the diff",
+    )
+    parser.add_argument(
+        "--target-store",
+        dest="target_store",
+        help="SQLite path for the recon store: each tool call is journalled and the "
+        "TargetModel (endpoints, technologies) is accumulated across runs",
+    )
+    parser.add_argument(
+        "--assessment-id",
+        dest="assessment_id",
+        help="assessment id the recon store is keyed by, like 'ASMT-001' (default: ASMT-001)",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     load_env()
     args = parse_args()
+
+    # The recon store turns on the ToolResultAdapter: every tool call is
+    # journalled and fed to the recon pipeline, which accumulates a
+    # TargetModel. It needs an assessment id to key by; default one so
+    # `--target-store x.db` alone is enough. The id is a canonical domain id
+    # (`^[A-Z]{2,}-[0-9]{3,}$`, e.g. ASMT-001), validated here rather than
+    # deep in the adapter where it would fail every tool call mid-run.
+    target_store = SQLiteTargetStore(args.target_store) if args.target_store else None
+    assessment_id = args.assessment_id or ("ASMT-001" if target_store else None)
+    if assessment_id is not None and not re.fullmatch(r"[A-Z]{2,}-[0-9]{3,}", assessment_id):
+        print(
+            f"error: --assessment-id {assessment_id!r} must look like 'ASMT-001' "
+            "(two+ uppercase letters, a dash, three+ digits)",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         checker = SecurityChecker(
@@ -81,6 +103,9 @@ def main() -> int:
             allow_subdomains=args.subdomains,
             trace_level=args.trace,
             use_judge=args.judge,
+            history_db=args.history_db,
+            assessment_id=assessment_id,
+            target_store=target_store,
         )
     except ValueError as exc:  # a bad scope is the caller's mistake, not a crash
         print(f"error: {exc}", file=sys.stderr)
@@ -113,6 +138,13 @@ def main() -> int:
 
     if len(results) > 1:
         overview(results)
+
+    # What the recon pipeline accumulated into the TargetModel this run - the
+    # half that is more than "run the tools": a map of the target that grows
+    # across runs, keyed by assessment and target.
+    if target_store is not None:
+        recon_summary(target_store, assessment_id, args.target)
+        target_store.close()
 
     if args.json_path:
         print(f"\nJSON  -> {write_json(results, args.json_path)}")
@@ -151,6 +183,22 @@ def report(result, *, trace: bool) -> None:
             where = f" ({error.tool})" if error.tool else ""
             print(f"    {error.kind}{code}{where}: {error.message}")
 
+    # Only present with --history, and only from the second run on - the first
+    # run of a target and check has nothing to compare against.
+    if result.diff is not None:
+        diff = result.diff
+        print(f"  DIFF (vs run {diff.previous_run_id})")
+        for label, ids in (
+            ("new", diff.new),
+            ("fixed", diff.fixed),
+            ("unchanged", diff.unchanged),
+            ("unverified", diff.unverified),
+        ):
+            for finding_id in ids:
+                # The title, not the id: "new 1a9bd79b152f" tells a reader
+                # nothing, "new Missing CSP header" tells them what changed.
+                print(f"    {label:11} {diff.label(finding_id)}")
+
     if trace and result.trace:
         print("  TRACE")
         for step in result.trace:
@@ -161,6 +209,45 @@ def report(result, *, trace: bool) -> None:
             why = f"  {step.summary}" if step.summary and step.summary != step.name else ""
             print(f"    {step.id:4} {step.kind:13} {step.name:22} {step.status:9}{took}{why}")
     print()
+
+
+def recon_summary(store, assessment_id: str, target: str) -> None:
+    """What the recon pipeline accumulated into the TargetModel.
+
+    Reads the store back the same way the next run will: `load_target` by
+    assessment and target. The key is the target as the tools received it,
+    which for one URL is the URL itself; we try that, then fall back to
+    whatever targets the assessment recorded, so a canonicalized key still
+    shows.
+    """
+    model = store.load_target(assessment_id, target)
+    if model is None:
+        # The tools may have stored the target under a canonicalized key.
+        rows = store._connection.execute(
+            "SELECT canonical_target FROM targets WHERE assessment_id = ?", (assessment_id,)
+        ).fetchall()
+        for row in rows:
+            model = store.load_target(assessment_id, row[0])
+            if model is not None:
+                target = row[0]
+                break
+
+    revision = model.revision if model else 0
+    print(f"\n{'=' * 78}\nRECON (TargetModel, revision {revision})\n{'=' * 78}")
+    if model is None:
+        print("  nothing accumulated — no tool call produced recon data this run")
+        return
+
+    print(f"  target      {target}")
+    print(f"  technologies {len(model.technologies)}")
+    for tech in model.technologies:
+        version = f" {tech.version}" if getattr(tech, "version", "") else ""
+        print(f"    - {tech.name}{version}  ({tech.category})")
+    print(f"  endpoints    {len(model.endpoints)}")
+    for ep in model.endpoints[:20]:
+        print(f"    - {ep.method} {ep.origin}{ep.path}")
+    if len(model.endpoints) > 20:
+        print(f"    ... and {len(model.endpoints) - 20} more")
 
 
 def overview(results) -> None:

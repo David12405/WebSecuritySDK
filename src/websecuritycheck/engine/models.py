@@ -51,6 +51,16 @@ def build_model(model: str, *, api_key: str | None = None, temperature: float = 
                 "no OpenAI API key: set OPENAI_API_KEY in the environment (a .env file "
                 "is read by examples/run_check.py) or pass Settings(api_key=...)"
             )
+        # Imported here, not at module top, so the OpenAI SDK is an optional
+        # extra: a Bedrock user never pays for it, and the whole package still
+        # imports without it. `pip install websecuritycheck[openai]`.
+        try:
+            from strands.models.openai import OpenAIModel
+        except ImportError as exc:
+            raise ImportError(
+                "the OpenAI provider needs the 'openai' extra: "
+                "pip install websecuritycheck[openai]"
+            ) from exc
         return OpenAIModel(
             client_args={"api_key": key},
             model_id=model_id,

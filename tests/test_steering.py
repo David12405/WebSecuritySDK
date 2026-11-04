@@ -26,6 +26,7 @@ from websecuritycheck.policy.steering import (
     check_evidence,
     check_grounding,
     check_tools_used,
+    error_code,
     message_for,
     review,
     tokens,
@@ -232,6 +233,17 @@ def test_the_message_names_every_issue_and_restates_the_contract() -> None:
     assert "structured output" in text
     # A model asked to revise tends to send only what changed.
     assert "every finding you" in text
+
+
+def test_a_judge_rule_becomes_a_well_formed_error_code() -> None:
+    """`judge:follows` must not leak a colon into an `E_*` code.
+
+    The code ends up in SARIF notification descriptor ids, where every other
+    code is letters, digits and underscores.
+    """
+    assert error_code("judge:follows") == "E_STEERING_JUDGE_FOLLOWS"
+    assert error_code("judge:method") == "E_STEERING_JUDGE_METHOD"
+    assert error_code("grounding") == "E_STEERING_GROUNDING"
 
 
 # --------------------------------------------------------------------------
