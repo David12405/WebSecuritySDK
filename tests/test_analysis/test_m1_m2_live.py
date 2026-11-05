@@ -477,7 +477,12 @@ async def _verify_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
         if isinstance(finding, dict) and isinstance(finding.get("rule_id"), str)
     }
     missing = sorted(EXPECTED_RULE_IDS - detected_rule_ids)
-    assert not missing, f"Semgrep rules failed their positive control: {missing}"
+    assert not missing, (
+        "Semgrep rules failed their positive control: "
+        f"missing={missing}, detected={sorted(detected_rule_ids)}, "
+        f"files_scanned={data.get('files_scanned')!r}, "
+        f"version={data.get('version')!r}, errors={data.get('errors')!r}"
+    )
     errors = data.get("errors")
     assert isinstance(errors, list) and not errors, (
         f"Semgrep positive control reported errors: {errors!r}"

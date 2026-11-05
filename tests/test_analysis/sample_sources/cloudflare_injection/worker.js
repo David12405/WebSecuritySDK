@@ -2,12 +2,9 @@
 export async function vulnerableFixture(request, env, childProcess) {
   const url = new URL(request.url);
 
-  const expression = url.searchParams.get("expression");
-  eval(expression);
+  eval(url.searchParams.get("expression"));
 
-  const userId = url.searchParams.get("user_id");
-  await env.DB.prepare(`SELECT * FROM users WHERE id = ${userId}`).all();
+  await env.DB.prepare(url.searchParams.get("unsafe_sql")).all();
 
-  const command = url.searchParams.get("command");
-  childProcess.exec(command);
+  childProcess.exec(url.searchParams.get("command"));
 }
