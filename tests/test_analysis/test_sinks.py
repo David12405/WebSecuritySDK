@@ -21,6 +21,7 @@ from test_analysis.fixtures import (
 from websecuritycheck.analysis.inputs import extract_input_candidates
 from websecuritycheck.analysis.semgrep_adapter import (
     LocalSemgrepAdapter,
+    compute_ruleset_sha256,
     validate_offline_ruleset_path,
     validate_source_analysis_scope,
 )
@@ -131,6 +132,35 @@ def test_empty_semgrep_findings_produces_no_orphan_evidence():
     res_cli = extract_sink_candidates(req, semgrep_payload=raw_cli)
     assert res_cli.sink_candidates == []
     assert res_cli.analysis_evidence_records == []
+
+
+def test_semgrep_scan_coverage_and_provenance_reach_evidence():
+    request = make_shop_analysis_request_with_scope()
+    payload = make_semgrep_envelope([make_semgrep_finding()])
+    payload["data"].update(
+        {
+            "scanned_files": ["app/routes.py"],
+            "ruleset_sha256": "a" * 64,
+            "source_revision": "revision-1",
+            "execution_ref": "EXEC-123",
+        }
+    )
+    result = extract_sink_candidates(request, semgrep_payload=payload)
+    assert result.scanned_files == ["app/routes.py"]
+    assert result.ruleset_sha256 == "a" * 64
+    assert result.source_revision == "revision-1"
+    assert result.execution_ref == "EXEC-123"
+    assert result.analysis_evidence_records[0].execution_ref == "EXEC-123"
+    assert result.analysis_evidence_records[0].provenance["ruleset_sha256"] == "a" * 64
+
+
+def test_zero_file_semgrep_scan_is_explicit_limitation():
+    request = make_shop_analysis_request_with_scope()
+    payload = make_semgrep_envelope([])
+    payload["data"]["files_scanned"] = 0
+    payload["data"]["scanned_files"] = []
+    result = extract_sink_candidates(request, semgrep_payload=payload)
+    assert "SEMGREP_SCAN_EMPTY" in result.limitations
 
 
 # 3. test_semgrep_execution_failure_and_malformed_json_fail_closed
@@ -292,6 +322,10 @@ def test_strict_offline_ruleset_and_layer6_startup_env_validation(tmp_path: Path
     valid_yaml.write_text("rules: []", encoding="utf-8")
     resolved = validate_offline_ruleset_path(str(valid_yaml))
     assert Path(resolved).resolve() == valid_yaml.resolve()
+    first_digest = compute_ruleset_sha256(valid_yaml)
+    assert len(first_digest) == 64
+    valid_yaml.write_text("rules:\n  - id: changed\n", encoding="utf-8")
+    assert compute_ruleset_sha256(valid_yaml) != first_digest
 
 
 # 7. test_concurrent_adapter_executions_with_different_local_rulesets_and_provenance

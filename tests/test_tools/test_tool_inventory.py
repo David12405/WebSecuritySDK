@@ -17,6 +17,10 @@ TOOL_COVERAGE = {
     "fingerprint_web": "whatweb",
     "parse_api_spec": "openapi",
     "explore_browser": "browser",
+    "inspect_source_tree": "source",
+    "read_source_file": "source",
+    "search_source": "source",
+    "analyze_source": "semgrep",
 }
 
 
@@ -34,4 +38,6 @@ def test_tool_inventory_has_no_unclassified_entries():
         "whatweb",
         "openapi",
         "browser",
+        "source",
+        "semgrep",
     }

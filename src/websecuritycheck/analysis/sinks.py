@@ -189,6 +189,11 @@ class SinkExtractionResult(StrictModel):
     analysis_evidence_records: list[EvidenceArtifactRecord] = Field(default_factory=list)
     artifact_manifests: list[ArtifactManifest] = Field(default_factory=list)
     sink_metadata: dict[SinkId, SinkCorrelationMetadata] = Field(default_factory=dict)
+    scanned_files: list[str] = Field(default_factory=list)
+    semgrep_version: str | None = None
+    ruleset_sha256: str | None = None
+    execution_ref: str | None = None
+    source_revision: str | None = None
     limitations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -806,11 +811,23 @@ def extract_sink_candidates(
         raw_data.get("ruleset_ref") or raw_data.get("ruleset") or "local-ruleset"
     )
     provenance_ruleset_path = raw_data.get("ruleset_path")
+    provenance_ruleset_sha256 = raw_data.get("ruleset_sha256")
+    provenance_execution_ref = raw_data.get("execution_ref")
+    provenance_source_revision = raw_data.get("source_revision")
     scan_path = str(raw_data.get("path") or ".")
+    scanned_files_raw = raw_data.get("scanned_files")
+    scanned_files = (
+        sorted({str(item) for item in scanned_files_raw})
+        if isinstance(scanned_files_raw, list)
+        and all(isinstance(item, str) for item in scanned_files_raw)
+        else []
+    )
     is_truncated = bool(semgrep_payload.get("truncated") or raw_data.get("truncated"))
 
     limitations: set[str] = set()
     warnings: set[str] = set()
+    if raw_data.get("files_scanned") == 0:
+        limitations.add("SEMGREP_SCAN_EMPTY")
 
     # Scope check on top-level payload scan path if absolute
     if scan_path and (scan_path.startswith("/") or bool(re.match(r"^[A-Za-z]:", scan_path))):
@@ -1069,6 +1086,9 @@ def extract_sink_candidates(
                 "ruleset": provenance_ruleset,
                 "ruleset_ref": provenance_ruleset_ref,
                 "ruleset_path": provenance_ruleset_path,
+                "ruleset_sha256": provenance_ruleset_sha256,
+                "source_revision": provenance_source_revision,
+                "execution_ref": provenance_execution_ref,
                 "scan_path": scan_path,
             },
         }
@@ -1111,12 +1131,18 @@ def extract_sink_candidates(
             media_type="application/json",
             captured_at=capture_time,
             source_tool_id="semgrep",
+            execution_ref=(
+                Id(str(provenance_execution_ref)) if provenance_execution_ref else None
+            ),
             provenance={
                 "tool": provenance_tool,
                 "version": provenance_version,
                 "ruleset": provenance_ruleset,
                 "ruleset_ref": provenance_ruleset_ref,
                 "ruleset_path": provenance_ruleset_path,
+                "ruleset_sha256": provenance_ruleset_sha256,
+                "source_revision": provenance_source_revision,
+                "execution_ref": provenance_execution_ref,
                 "scan_path": scan_path,
             },
             redaction_applied=acc.redaction_applied,
@@ -1176,6 +1202,17 @@ def extract_sink_candidates(
         analysis_evidence_records=evidence_records,
         artifact_manifests=artifact_manifests,
         sink_metadata=sink_metadata_map,
+        scanned_files=scanned_files,
+        semgrep_version=(
+            str(provenance_version) if provenance_version is not None else None
+        ),
+        ruleset_sha256=(
+            str(provenance_ruleset_sha256) if provenance_ruleset_sha256 else None
+        ),
+        execution_ref=(str(provenance_execution_ref) if provenance_execution_ref else None),
+        source_revision=(
+            str(provenance_source_revision) if provenance_source_revision else None
+        ),
         limitations=sorted(limitations),
         warnings=sorted(warnings),
     )

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
+import subprocess
+import uuid
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Protocol, runtime_checkable
 
@@ -106,6 +109,73 @@ def _directory_has_rule_file(directory: Path) -> bool:
                 if inspected >= _MAX_RULESET_DIR_SCAN_FILES:
                     return False
     return False
+
+
+def _ruleset_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    files: list[Path] = []
+    for candidate in sorted(path.rglob("*")):
+        if candidate.is_symlink():
+            raise ToolError("E_TOOL_UNAVAILABLE", "Symlinked Semgrep rules are not permitted")
+        if any(part in _IGNORED_DIRS for part in candidate.relative_to(path).parts):
+            continue
+        if candidate.is_file() and candidate.suffix.lower() in _ALLOWED_RULESET_SUFFIXES:
+            files.append(candidate)
+        if len(files) > _MAX_RULESET_DIR_SCAN_FILES:
+            raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep ruleset directory is too large")
+    return files
+
+
+def compute_ruleset_sha256(ruleset_path: str | Path) -> str:
+    """Return a stable digest for one approved rule file or a rule directory."""
+    resolved = Path(validate_offline_ruleset_path(ruleset_path))
+    if resolved.is_file():
+        # Preserve the conventional sha256sum value for a single ruleset file.
+        return hashlib.sha256(resolved.read_bytes()).hexdigest()
+
+    digest = hashlib.sha256()
+    base = resolved
+    for rule_file in _ruleset_files(resolved):
+        relative = rule_file.relative_to(base).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        content = rule_file.read_bytes()
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def _find_git_root(path: Path) -> Path | None:
+    for candidate in (path, *path.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _source_revision(target_root: str) -> str | None:
+    git_root = _find_git_root(Path(target_root).resolve())
+    if git_root is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-c",
+                f"safe.directory={git_root.as_posix()}",
+                "rev-parse",
+                "HEAD",
+            ],
+            cwd=git_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    revision = completed.stdout.strip()
+    return revision if completed.returncode == 0 and revision else None
 
 
 def validate_source_analysis_scope(
@@ -339,6 +409,9 @@ class LocalSemgrepAdapter:
             )
 
         ruleset_ref = Path(approved_ruleset).name
+        ruleset_sha256 = compute_ruleset_sha256(approved_ruleset)
+        execution_ref = f"EXEC-{uuid.uuid4().int}"
+        source_revision = _source_revision(target_root)
         base_runner = self._runner or l6_semgrep._default_runner
 
         # 3. Bind approved_ruleset into a per-call runner closure (zero os.environ mutation)
@@ -366,6 +439,10 @@ class LocalSemgrepAdapter:
             envelope_result["data"]["ruleset"] = "local-approved"
             envelope_result["data"]["ruleset_ref"] = ruleset_ref
             envelope_result["data"]["ruleset_path"] = approved_ruleset
+            envelope_result["data"]["ruleset_sha256"] = ruleset_sha256
+            envelope_result["data"]["execution_ref"] = execution_ref
+            if source_revision is not None:
+                envelope_result["data"]["source_revision"] = source_revision
         return envelope_result
 
     def run_sync(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
@@ -384,6 +461,7 @@ class LocalSemgrepAdapter:
 __all__ = [
     "AsyncSourceAnalysisPort",
     "LocalSemgrepAdapter",
+    "compute_ruleset_sha256",
     "validate_offline_ruleset_path",
     "validate_source_analysis_scope",
 ]

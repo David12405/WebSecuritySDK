@@ -77,9 +77,11 @@ def test_semgrep_parser_uses_authoritative_scanned_paths_and_redacts(tmp_path: P
     result = run(semgrep.analyze_source(str(tmp_path), runner=fake_runner))
     finding = result["data"]["findings"][0]
     assert result["data"]["files_scanned"] == 1
+    assert result["data"]["scanned_files"] == [".env.production"]
     assert finding["file"] == ".env.production"
     assert finding["snippet"] is None
-    assert finding["metavariables"] == {"$X": {}}
+    assert finding["dataflow_trace"] is None
+    assert finding["metavariables"] == {}
 
 
 def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
@@ -96,7 +98,59 @@ def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
 
     result = run(semgrep.analyze_source(str(tmp_path), runner=fake_runner))
     assert result["data"]["files_scanned"] is None
+    assert result["data"]["scanned_files"] == []
     assert result["data"]["findings"] == []
+
+
+def test_semgrep_nested_root_uses_git_root_and_normalizes_scanned_files(tmp_path: Path):
+    repo = tmp_path / "repo"
+    approved = repo / "nested" / "approved"
+    approved.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    source_file = approved / "main.py"
+    source_file.write_text("print('ok')", encoding="utf-8")
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        assert cwd == repo
+        assert argv[-1] == "nested/approved"
+        output_path.write_text(
+            json.dumps(
+                {
+                    "results": [],
+                    "errors": [],
+                    "paths": {"scanned": ["nested/approved/main.py"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    result = run(semgrep.analyze_source(str(approved), runner=fake_runner))
+    assert result["data"]["files_scanned"] == 1
+    assert result["data"]["scanned_files"] == ["main.py"]
+
+
+def test_semgrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text("print('outside')", encoding="utf-8")
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        output_path.write_text(
+            json.dumps(
+                {
+                    "results": [],
+                    "errors": [],
+                    "paths": {"scanned": ["../outside.py"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    with pytest.raises(ToolError, match=r"invalid|out-of-scope"):
+        run(semgrep.analyze_source(str(approved), runner=fake_runner))
 
 
 def test_mcp_registration_is_backward_compatible():

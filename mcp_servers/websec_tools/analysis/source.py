@@ -149,9 +149,9 @@ def is_exposure_safe(path: Path) -> bool:
     name = path.name.lower()
     if name.startswith(".env") or name in SENSITIVE_NAMES:
         return False
-    if name.endswith(SENSITIVE_SUFFIXES) or "secret" in name or "password" in name:
-        return False
-    return True
+    return not (
+        name.endswith(SENSITIVE_SUFFIXES) or "secret" in name or "password" in name
+    )
 
 
 def is_analyzer_safe(path: Path) -> bool:
@@ -339,6 +339,12 @@ async def search_source(
 
 
 __all__ = [
-    "inspect_source_tree", "read_source_file", "search_source", "is_analyzer_safe",
-    "is_exposure_safe", "relative_path", "_resolve_relative", "_validate_root",
+    "_resolve_relative",
+    "_validate_root",
+    "inspect_source_tree",
+    "is_analyzer_safe",
+    "is_exposure_safe",
+    "read_source_file",
+    "relative_path",
+    "search_source",
 ]

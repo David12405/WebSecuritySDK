@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..errors import ToolError, envelope
 from .source import (
@@ -74,6 +74,7 @@ class SemgrepAnalysisResult(_Model):
     status: str
     path: str
     files_scanned: int | None = None
+    scanned_files: list[str] = Field(default_factory=list)
     findings: list[SemgrepFinding]
     errors: list[Any]
 
@@ -123,12 +124,17 @@ def _cap(value: Any, depth: int = 0) -> Any:
     return None
 
 
-def _safe_diagnostic(value: Any, root: Path) -> Any:
+def _safe_diagnostic(
+    value: Any, execution_root: Path, approved_root: Path, scan_path: Path
+) -> Any:
     capped = _cap(value)
     if isinstance(capped, dict):
         if isinstance(capped.get("path"), str):
             try:
-                capped["path"] = relative_path(root, _resolve_reported_path(root, capped["path"]))
+                resolved = _resolve_reported_path(execution_root, capped["path"])
+                if not _is_within(resolved, scan_path):
+                    raise ToolError("E_PARSE", "diagnostic path lies outside scan scope")
+                capped["path"] = relative_path(approved_root, resolved)
             except ToolError:
                 capped.pop("path", None)
         return capped
@@ -142,6 +148,22 @@ def _location(value: Any) -> tuple[int, int | None]:
     column = value.get("col")
     return (line if isinstance(line, int) and line > 0 else 0,
             column if isinstance(column, int) and column > 0 else None)
+
+
+def _find_execution_root(root: Path) -> Path:
+    """Use the nearest Git worktree root so Semgrep targets nested roots reliably."""
+    for candidate in (root, *root.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return root
+
+
+def _is_within(path: Path, boundary: Path) -> bool:
+    try:
+        path.relative_to(boundary)
+    except ValueError:
+        return False
+    return True
 
 
 def _resolve_reported_path(root: Path, value: str) -> Path:
@@ -159,7 +181,12 @@ def _resolve_reported_path(root: Path, value: str) -> Path:
 
 
 def _normalize(
-    raw: dict[str, Any], root: Path, path: str, ruleset: str
+    raw: dict[str, Any],
+    *,
+    execution_root: Path,
+    approved_root: Path,
+    scan_path: Path,
+    ruleset: str,
 ) -> tuple[dict[str, Any], bool]:
     results = raw.get("results")
     if not isinstance(results, list):
@@ -168,13 +195,21 @@ def _normalize(
     if not isinstance(errors, list):
         errors = []
     paths = raw.get("paths")
-    files_scanned: int | None = None
+    scanned_files: list[str] = []
     if (
         isinstance(paths, dict)
         and isinstance(paths.get("scanned"), list)
         and all(isinstance(item, str) for item in paths["scanned"])
     ):
-        files_scanned = len(paths["scanned"])
+        for item in paths["scanned"]:
+            resolved = _resolve_reported_path(execution_root, item)
+            if not _is_within(resolved, scan_path) or not is_analyzer_safe(resolved):
+                raise ToolError("E_PARSE", "Semgrep output contains an out-of-scope scanned path")
+            scanned_files.append(relative_path(approved_root, resolved))
+        scanned_files = sorted(set(scanned_files))
+        files_scanned: int | None = len(scanned_files)
+    else:
+        files_scanned = None
     findings: list[SemgrepFinding] = []
     truncated = len(results) > MAX_FINDINGS
     for item in results[:MAX_FINDINGS]:
@@ -185,11 +220,11 @@ def _normalize(
         ):
             continue
         try:
-            finding_path = _resolve_reported_path(root, item["path"])
+            finding_path = _resolve_reported_path(execution_root, item["path"])
         except ToolError:
             continue
-        if not is_analyzer_safe(finding_path):
-            continue
+        if not _is_within(finding_path, scan_path) or not is_analyzer_safe(finding_path):
+            raise ToolError("E_PARSE", "Semgrep output contains an out-of-scope finding path")
         start_line, start_col = _location(item.get("start"))
         end_line, end_col = _location(item.get("end"))
         if start_line == 0:
@@ -205,7 +240,7 @@ def _normalize(
         trace = extra.get("dataflow_trace") if exposed else None
         snippet = extra.get("lines") if exposed and isinstance(extra.get("lines"), str) else None
         findings.append(SemgrepFinding(
-            rule_id=item["check_id"], file=relative_path(root, finding_path),
+            rule_id=item["check_id"], file=relative_path(approved_root, finding_path),
             start_line=start_line, start_column=start_col, end_line=end_line or None,
             end_column=end_col,
             message=extra.get("message") if isinstance(extra.get("message"), str) else None,
@@ -222,9 +257,15 @@ def _normalize(
     result = SemgrepAnalysisResult(
         ruleset=ruleset,
         status="completed",
-        path=relative_path(root, _resolve_relative(root, path, reject_symlink=True)),
-        version=version, files_scanned=files_scanned, findings=findings,
-        errors=[_safe_diagnostic(error, root) for error in errors],
+        path=relative_path(approved_root, scan_path),
+        version=version,
+        files_scanned=files_scanned,
+        scanned_files=scanned_files,
+        findings=findings,
+        errors=[
+            _safe_diagnostic(error, execution_root, approved_root, scan_path)
+            for error in errors
+        ],
     ).model_dump(mode="json")
     return result, truncated
 
@@ -284,7 +325,8 @@ async def analyze_source(
         raise ToolError("E_INVALID_ARGUMENT", "scan path is invalid")
     executable = _configuration(os.environ.get("WEBSEC_SEMGREP_PATH"), executable=True)
     configured_ruleset, output_ruleset = _ruleset()
-    relative_scan = relative_path(root, scan_path)
+    execution_root = _find_execution_root(root)
+    relative_scan = relative_path(execution_root, scan_path)
     with tempfile.TemporaryDirectory(prefix="websec-semgrep-") as temp_name:
         temp = Path(temp_name)
         output_path, stderr_path = temp / "result.json", temp / "stderr.log"
@@ -302,7 +344,7 @@ async def analyze_source(
         execute = runner or _default_runner
         try:
             code = await asyncio.wait_for(
-                execute(argv, root, output_path, stderr_path), timeout=GLOBAL_TIMEOUT
+                execute(argv, execution_root, output_path, stderr_path), timeout=GLOBAL_TIMEOUT
             )
         except TimeoutError:
             raise ToolError("E_TIMEOUT", "Semgrep timed out") from None
@@ -318,7 +360,13 @@ async def analyze_source(
             raise ToolError("E_PARSE", "Semgrep output is invalid") from None
     if not isinstance(raw, dict):
         raise ToolError("E_PARSE", "Semgrep output is invalid")
-    data, truncated = _normalize(raw, root, path, output_ruleset)
+    data, truncated = _normalize(
+        raw,
+        execution_root=execution_root,
+        approved_root=root,
+        scan_path=scan_path,
+        ruleset=output_ruleset,
+    )
     return envelope(
         f"Semgrep completed with {len(data['findings'])} findings", data, truncated=truncated
     )
