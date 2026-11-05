@@ -18,6 +18,7 @@ from test_analysis.m1_m2_live_support import (
     DEFAULT_RULESET,
     DEFAULT_VENDOR_RULESET,
     EXPECTED_RULE_IDS,
+    EXPECTED_SINK_LINES,
     RULESET_FIXTURE_ROOT,
     TARGET_CASES,
     assert_source_contract,
@@ -31,6 +32,7 @@ from websecuritycheck.analysis.semgrep_adapter import (
 )
 from websecuritycheck.analysis.sinks import extract_sink_candidates
 from websecuritycheck.domain import TestingMode
+from websecuritycheck.domain.analysis_models import ConfidenceLevel
 
 SEMGREP_REQUIRED = pytest.mark.skipif(
     os.getenv("RUN_SEMGREP_CLI") != "1",
@@ -95,6 +97,59 @@ def test_primary_preflight_zero_scan_has_report_safe_diagnostics(monkeypatch) ->
     assert diagnostics["missing_rule_ids"] == sorted(EXPECTED_RULE_IDS)
 
 
+def _traceless_preflight_adapter(sink_lines: dict[str, int]):
+    class TracelessAdapter:
+        def __init__(self, *, ruleset_path) -> None:
+            pass
+
+        async def analyze(self, target_root: str, subpath: str = "."):
+            return {
+                "data": {
+                    "version": "1.183.0",
+                    "status": "completed",
+                    "files_scanned": 1,
+                    "scanned_files": ["positive/worker.js"],
+                    "findings": [
+                        {
+                            "rule_id": rule_id,
+                            "file": "positive/worker.js",
+                            "start_line": line,
+                            "dataflow_trace": None,
+                        }
+                        for rule_id, line in sink_lines.items()
+                    ],
+                    "errors": [],
+                }
+            }
+
+    return TracelessAdapter
+
+
+def test_primary_preflight_accepts_traceless_findings_at_expected_lines(monkeypatch) -> None:
+    monkeypatch.setattr(
+        live_support, "LocalSemgrepAdapter", _traceless_preflight_adapter(EXPECTED_SINK_LINES)
+    )
+    result = asyncio.run(
+        live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace())
+    )
+    assert result["status"] == "completed"
+    assert result["dataflow_traces_available"] is False
+    assert result["traceless_rule_ids"] == sorted(EXPECTED_RULE_IDS)
+    assert result["sink_line_mismatch"] == {}
+
+
+def test_primary_preflight_rejects_wrong_sink_line(monkeypatch) -> None:
+    shifted = {**EXPECTED_SINK_LINES, "cloudflare-workers.tainted-code-injection": 4}
+    monkeypatch.setattr(live_support, "LocalSemgrepAdapter", _traceless_preflight_adapter(shifted))
+    with pytest.raises(live_support.PrimaryRulesetContractError) as failure:
+        asyncio.run(live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace()))
+    diagnostics = failure.value.diagnostics
+    assert diagnostics["failure_code"] == "sink_line_mismatch"
+    assert diagnostics["sink_line_mismatch"] == {
+        "cloudflare-workers.tainted-code-injection": [4]
+    }
+
+
 @pytest.mark.parametrize("case", TARGET_CASES, ids=lambda case: case.name)
 def test_target_source_mapping_and_scope_are_offline_contracts(case) -> None:
     if not source_files(case.source_root):
@@ -143,6 +198,61 @@ def _rebase_paths(value, prefix: str):
     return value
 
 
+def _fixture_request():
+    return make_shop_analysis_request_with_scope(
+        source_repo_path=str(RULESET_FIXTURE_ROOT.resolve()),
+        source_repository_ref=str(RULESET_FIXTURE_ROOT.resolve()),
+        testing_mode=TestingMode.WHITEBOX,
+    )
+
+
+def _sink_lines_by_rule(findings) -> dict[str, set[int]]:
+    lines: dict[str, set[int]] = {}
+    for item in findings:
+        lines.setdefault(item["rule_id"], set()).add(item["start_line"])
+    return lines
+
+
+def _assert_expected_sink_lines(findings) -> None:
+    lines = _sink_lines_by_rule(findings)
+    for rule_id, line in EXPECTED_SINK_LINES.items():
+        assert line in lines.get(rule_id, set()), (rule_id, line, lines.get(rule_id))
+
+
+def test_recorded_positive_output_without_traces_still_yields_sinks() -> None:
+    """Semgrep 1.183 omits dataflow_trace; sink locations alone must still work."""
+    recorded = json.loads(RECORDED_POSITIVE_OUTPUT.read_text(encoding="utf-8"))
+    for result in recorded["results"]:
+        result["extra"].pop("dataflow_trace", None)
+
+    async def traceless_runner(argv, cwd, output_path, stderr_path) -> int:
+        relative_root = RULESET_FIXTURE_ROOT.resolve().relative_to(Path(cwd).resolve())
+        prefix = "" if relative_root == Path(".") else f"{relative_root.as_posix()}/"
+        Path(output_path).write_text(
+            json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8"
+        )
+        return 0
+
+    adapter = LocalSemgrepAdapter(ruleset_path=DEFAULT_RULESET, runner=traceless_runner)
+    positive = asyncio.run(
+        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
+    )
+    data = positive["data"]
+    assert {item["rule_id"] for item in data["findings"]} == EXPECTED_RULE_IDS
+    assert all(item["dataflow_trace"] is None for item in data["findings"])
+    _assert_expected_sink_lines(data["findings"])
+
+    extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
+    assert len(extraction.sink_candidates) == 3
+    assert sorted(sc.start_line for sc in extraction.sink_candidates) == sorted(
+        EXPECTED_SINK_LINES.values()
+    )
+    for sc in extraction.sink_candidates:
+        assert sc.has_static_taint_flow is False
+        assert not sc.dataflow_steps
+        assert sc.confidence == ConfidenceLevel.MEDIUM
+
+
 def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None:
     recorded = json.loads(RECORDED_POSITIVE_OUTPUT.read_text(encoding="utf-8"))
     seen_argv: list[str] = []
@@ -172,15 +282,11 @@ def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None
         sink_location = item["dataflow_trace"]["taint_sink"][1][0]
         assert sink_location["path"] == "positive/worker.js"
 
-    request = make_shop_analysis_request_with_scope(
-        source_repo_path=str(RULESET_FIXTURE_ROOT.resolve()),
-        source_repository_ref=str(RULESET_FIXTURE_ROOT.resolve()),
-        testing_mode=TestingMode.WHITEBOX,
-    )
-    extraction = extract_sink_candidates(request, semgrep_payload=positive)
+    extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
     assert len(extraction.sink_candidates) == 3
     assert all(sc.has_static_taint_flow for sc in extraction.sink_candidates)
     assert all(sc.dataflow_steps for sc in extraction.sink_candidates)
+    assert all(sc.confidence == ConfidenceLevel.HIGH for sc in extraction.sink_candidates)
 
 
 @pytest.mark.semgrep_cli
@@ -200,19 +306,19 @@ def test_primary_ruleset_positive_and_negative_controls() -> None:
     assert detected >= EXPECTED_RULE_IDS
     assert positive_data["files_scanned"] == 1
     assert positive_data["scanned_files"] == ["positive/worker.js"]
-    assert all(item.get("dataflow_trace") for item in positive_data["findings"])
+    # Dataflow traces are optional (Semgrep 1.183 omits them); sink lines are required.
+    _assert_expected_sink_lines(positive_data["findings"])
     assert positive_data["ruleset_sha256"] == compute_ruleset_sha256(ruleset)
     assert positive_data["execution_ref"].startswith("EXEC-")
 
-    request = make_shop_analysis_request_with_scope(
-        source_repo_path=str(RULESET_FIXTURE_ROOT.resolve()),
-        source_repository_ref=str(RULESET_FIXTURE_ROOT.resolve()),
-        testing_mode=TestingMode.WHITEBOX,
-    )
-    sink_extraction = extract_sink_candidates(request, semgrep_payload=positive)
+    sink_extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
     assert len(sink_extraction.sink_candidates) == 3
-    assert all(sc.has_static_taint_flow for sc in sink_extraction.sink_candidates)
-    assert all(bool(sc.dataflow_steps) for sc in sink_extraction.sink_candidates)
+    assert sorted(sc.start_line for sc in sink_extraction.sink_candidates) == sorted(
+        EXPECTED_SINK_LINES.values()
+    )
+    for sc in sink_extraction.sink_candidates:
+        # A taint flow is only claimed when Semgrep supplied a trace with steps.
+        assert sc.has_static_taint_flow == bool(sc.dataflow_steps)
 
     negative_data = negative["data"]
     assert negative_data["files_scanned"] == 1

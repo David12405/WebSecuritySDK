@@ -74,6 +74,13 @@ EXPECTED_RULE_IDS = frozenset(
         "cloudflare-workers.tainted-command-injection",
     }
 )
+# Sink line per rule in sample_sources/cloudflare_injection/positive/worker.js.
+# Semgrep dataflow traces are optional: the sink location is the required evidence.
+EXPECTED_SINK_LINES = {
+    "cloudflare-workers.tainted-code-injection": 5,
+    "cloudflare-workers.tainted-d1-sql-injection": 8,
+    "cloudflare-workers.tainted-command-injection": 11,
+}
 
 
 @dataclass(frozen=True)
@@ -566,13 +573,22 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
         if isinstance(item, dict) and isinstance(item.get("rule_id"), str)
     }
     missing = sorted(EXPECTED_RULE_IDS - detected)
-    missing_trace = sorted(
+    traceless = sorted(
         str(item.get("rule_id"))
         for item in findings
         if isinstance(item, dict)
         and item.get("rule_id") in EXPECTED_RULE_IDS
         and not item.get("dataflow_trace")
     )
+    lines_by_rule: dict[str, set[Any]] = {}
+    for item in findings:
+        if isinstance(item, dict) and item.get("rule_id") in EXPECTED_RULE_IDS:
+            lines_by_rule.setdefault(str(item["rule_id"]), set()).add(item.get("start_line"))
+    sink_line_mismatch = {
+        rule_id: sorted(lines_by_rule.get(rule_id, set()), key=str)
+        for rule_id, line in EXPECTED_SINK_LINES.items()
+        if line not in lines_by_rule.get(rule_id, set())
+    }
     diagnostics.update(
         {
             "semgrep_version": data.get("version"),
@@ -582,7 +598,10 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
             "finding_count": len(findings),
             "detected_rule_ids": sorted(detected),
             "missing_rule_ids": missing,
-            "missing_trace_rule_ids": missing_trace,
+            "traceless_rule_ids": traceless,
+            "dataflow_traces_available": bool(findings) and not traceless,
+            "expected_sink_lines": EXPECTED_SINK_LINES,
+            "sink_line_mismatch": sink_line_mismatch,
             "trace_keys_by_rule": {
                 str(item.get("rule_id")): (
                     sorted(item["dataflow_trace"])
@@ -618,8 +637,11 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
             "missing_rule",
             f"missing={missing!r}, detected={sorted(detected)!r}",
         )
-    if missing_trace:
-        fail("missing_trace", f"rules without dataflow trace: {missing_trace!r}")
+    if sink_line_mismatch:
+        fail(
+            "sink_line_mismatch",
+            f"expected sink lines {EXPECTED_SINK_LINES!r}, got {sink_line_mismatch!r}",
+        )
 
     result = {
         **diagnostics,
