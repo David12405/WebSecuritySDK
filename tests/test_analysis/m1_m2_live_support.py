@@ -114,6 +114,14 @@ class LiveDependencyError(RuntimeError):
     """An authorized live dependency is temporarily unavailable."""
 
 
+class PrimaryRulesetContractError(AssertionError):
+    """Primary ruleset preflight failed with report-safe diagnostics."""
+
+    def __init__(self, message: str, diagnostics: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
 class Trace:
     def __init__(self) -> None:
         self.entries: list[dict[str, Any]] = []
@@ -506,37 +514,118 @@ async def collect_m1(case: TargetCase, config: AssessmentConfig, trace: Trace) -
 
 
 async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
-    trace.add("ruleset", "semgrep_positive_control", "started")
-    envelope = await LocalSemgrepAdapter(ruleset_path=ruleset).analyze(
-        str(RULESET_FIXTURE_ROOT.resolve()), subpath="positive"
+    started = time.perf_counter()
+    requested_file = "positive/worker.js"
+    trace.add(
+        "ruleset",
+        "semgrep_positive_control",
+        "started",
+        requested_file=requested_file,
     )
+    diagnostics: dict[str, Any] = {
+        "status": "contract_failed",
+        "requested_file": requested_file,
+        "expected_rule_ids": sorted(EXPECTED_RULE_IDS),
+        "ruleset_sha256": compute_ruleset_sha256(ruleset),
+    }
+
+    def fail(code: str, message: str) -> None:
+        diagnostics["failure_code"] = code
+        diagnostics["error"] = message
+        diagnostics["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        trace.add(
+            "ruleset",
+            "semgrep_positive_control",
+            "contract_failed",
+            **{key: value for key, value in diagnostics.items() if key != "status"},
+        )
+        raise PrimaryRulesetContractError(f"{code}: {message}", dict(diagnostics))
+
+    try:
+        envelope = await LocalSemgrepAdapter(ruleset_path=ruleset).analyze(
+            str(RULESET_FIXTURE_ROOT.resolve()), subpath=requested_file
+        )
+    except Exception as exc:
+        fail("execution_failed", f"{type(exc).__name__}: {exc}")
+
+    if not isinstance(envelope, dict):
+        fail("malformed_envelope", "Semgrep positive control returned malformed data")
     data = envelope.get("data")
-    assert isinstance(data, dict), "Semgrep positive control returned malformed data"
+    if not isinstance(data, dict):
+        fail("malformed_envelope", "Semgrep positive control returned malformed data")
+
     findings = data.get("findings")
-    assert isinstance(findings, list), "Semgrep positive control omitted findings"
+    if not isinstance(findings, list):
+        fail("malformed_findings", "Semgrep positive control omitted findings")
+
+    errors = data.get("errors")
+    scanned = data.get("scanned_files")
     detected = {
         item.get("rule_id")
         for item in findings
         if isinstance(item, dict) and isinstance(item.get("rule_id"), str)
     }
     missing = sorted(EXPECTED_RULE_IDS - detected)
-    assert not missing, f"positive control missing rules {missing}; detected={sorted(detected)}"
-    scanned = data.get("scanned_files")
-    assert isinstance(scanned, list) and scanned, "positive control scanned zero files"
-    errors = data.get("errors")
-    assert isinstance(errors, list) and not errors, f"Semgrep errors: {errors!r}"
+    missing_trace = sorted(
+        str(item.get("rule_id"))
+        for item in findings
+        if isinstance(item, dict)
+        and item.get("rule_id") in EXPECTED_RULE_IDS
+        and not item.get("dataflow_trace")
+    )
+    diagnostics.update(
+        {
+            "semgrep_version": data.get("version"),
+            "files_scanned": data.get("files_scanned"),
+            "scanned_files": scanned,
+            "errors": errors,
+            "finding_count": len(findings),
+            "detected_rule_ids": sorted(detected),
+            "missing_rule_ids": missing,
+            "missing_trace_rule_ids": missing_trace,
+            "ruleset_sha256": data.get("ruleset_sha256") or diagnostics["ruleset_sha256"],
+            "execution_ref": data.get("execution_ref"),
+            "source_revision": data.get("source_revision"),
+        }
+    )
+    if not isinstance(errors, list):
+        fail("malformed_errors", "Semgrep positive control omitted its errors list")
+    if errors:
+        fail("semgrep_error", f"Semgrep positive control reported errors: {errors!r}")
+    if data.get("files_scanned") == 0:
+        fail("zero_scan", "Semgrep positive control scanned zero files")
+    if data.get("files_scanned") != 1:
+        fail(
+            "scan_count_mismatch",
+            f"expected one scanned file, got {data.get('files_scanned')!r}",
+        )
+    if not isinstance(scanned, list) or requested_file not in scanned:
+        fail(
+            "missing_scanned_file",
+            f"expected {requested_file!r} in scanned_files, got {scanned!r}",
+        )
+    if missing:
+        fail(
+            "missing_rule",
+            f"missing={missing!r}, detected={sorted(detected)!r}",
+        )
+    if missing_trace:
+        fail("missing_trace", f"rules without dataflow trace: {missing_trace!r}")
+
     result = {
-        "status": data.get("status"),
+        **diagnostics,
+        "status": "completed",
         "semgrep_version": data.get("version"),
-        "files_scanned": data.get("files_scanned"),
-        "scanned_files": scanned,
-        "finding_count": len(findings),
-        "detected_rule_ids": sorted(detected),
-        "ruleset_sha256": data.get("ruleset_sha256"),
-        "execution_ref": data.get("execution_ref"),
-        "source_revision": data.get("source_revision"),
+        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
-    trace.add("ruleset", "semgrep_positive_control", "completed", **result)
+    result.pop("failure_code", None)
+    result.pop("error", None)
+    trace.add(
+        "ruleset",
+        "semgrep_positive_control",
+        "completed",
+        **{key: value for key, value in result.items() if key != "status"},
+    )
     return result
 
 
@@ -726,6 +815,7 @@ __all__ = [
     "TARGET_CASES",
     "IntegrationReport",
     "LiveDependencyError",
+    "PrimaryRulesetContractError",
     "TargetCase",
     "assert_source_contract",
     "assessment",

@@ -13,6 +13,7 @@ from test_analysis.m1_m2_live_support import (
     TARGET_CASES,
     IntegrationReport,
     LiveDependencyError,
+    PrimaryRulesetContractError,
     TargetCase,
     audit_community_rules,
     resolve_primary_ruleset,
@@ -34,9 +35,13 @@ def live_m1_m2_context(request: pytest.FixtureRequest) -> tuple[IntegrationRepor
         pytest.skip(str(exc))
     report = IntegrationReport(ruleset)
     request.addfinalizer(report.write)
-    report.data["preflight"]["primary_ruleset"] = asyncio.run(
-        verify_primary_ruleset(ruleset, report.trace)
-    )
+    try:
+        report.data["preflight"]["primary_ruleset"] = asyncio.run(
+            verify_primary_ruleset(ruleset, report.trace)
+        )
+    except PrimaryRulesetContractError as exc:
+        report.data["preflight"]["primary_ruleset"] = exc.diagnostics
+        raise
     asyncio.run(audit_community_rules(report))
     return report, ruleset
 

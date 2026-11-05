@@ -130,6 +130,38 @@ def test_semgrep_nested_root_uses_git_root_and_normalizes_scanned_files(tmp_path
     assert result["data"]["scanned_files"] == ["main.py"]
 
 
+def test_semgrep_explicit_nested_file_is_the_command_target(tmp_path: Path):
+    repo = tmp_path / "repo"
+    approved = repo / "tests" / "fixture"
+    source_file = approved / "positive" / "worker.js"
+    source_file.parent.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    source_file.write_text("eval(input)", encoding="utf-8")
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        assert cwd == repo
+        assert argv[-1] == "tests/fixture/positive/worker.js"
+        output_path.write_text(
+            json.dumps(
+                {
+                    "results": [],
+                    "errors": [],
+                    "paths": {"scanned": ["tests/fixture/positive/worker.js"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    result = run(
+        semgrep.analyze_source(
+            str(approved), path="positive/worker.js", runner=fake_runner
+        )
+    )
+    assert result["data"]["files_scanned"] == 1
+    assert result["data"]["scanned_files"] == ["positive/worker.js"]
+
+
 def test_semgrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
     approved = tmp_path / "approved"
     approved.mkdir()

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from test_analysis import m1_m2_live_support as live_support
 from test_analysis.fixtures import make_shop_analysis_request_with_scope
 from test_analysis.m1_m2_live_support import (
     DEFAULT_RULESET,
@@ -51,7 +52,46 @@ def test_cloudflare_ruleset_yaml_and_ids_are_stable() -> None:
     rules = document["rules"]
     assert {rule["id"] for rule in rules} == EXPECTED_RULE_IDS
     assert all(rule.get("mode") == "taint" for rule in rules)
-    assert len(compute_ruleset_sha256(DEFAULT_RULESET)) == 64
+    assert compute_ruleset_sha256(DEFAULT_RULESET) == (
+        "11923c354378d4977056f74072d780cc3b5639cfb85b00f404dd10a144166f2e"
+    )
+
+
+def test_primary_preflight_zero_scan_has_report_safe_diagnostics(monkeypatch) -> None:
+    class ZeroScanAdapter:
+        def __init__(self, *, ruleset_path) -> None:
+            assert Path(ruleset_path).resolve() == DEFAULT_RULESET.resolve()
+
+        async def analyze(self, target_root: str, subpath: str = "."):
+            assert Path(target_root).resolve() == RULESET_FIXTURE_ROOT.resolve()
+            assert subpath == "positive/worker.js"
+            return {
+                "data": {
+                    "version": "1.183.0",
+                    "status": "completed",
+                    "files_scanned": 0,
+                    "scanned_files": [],
+                    "findings": [],
+                    "errors": [],
+                    "ruleset_sha256": compute_ruleset_sha256(DEFAULT_RULESET),
+                }
+            }
+
+    monkeypatch.setattr(live_support, "LocalSemgrepAdapter", ZeroScanAdapter)
+    with pytest.raises(live_support.PrimaryRulesetContractError) as failure:
+        asyncio.run(
+            live_support.verify_primary_ruleset(
+                DEFAULT_RULESET, live_support.Trace()
+            )
+        )
+
+    diagnostics = failure.value.diagnostics
+    assert diagnostics["status"] == "contract_failed"
+    assert diagnostics["failure_code"] == "zero_scan"
+    assert diagnostics["requested_file"] == "positive/worker.js"
+    assert diagnostics["files_scanned"] == 0
+    assert diagnostics["scanned_files"] == []
+    assert diagnostics["missing_rule_ids"] == sorted(EXPECTED_RULE_IDS)
 
 
 @pytest.mark.parametrize("case", TARGET_CASES, ids=lambda case: case.name)
@@ -85,8 +125,12 @@ def test_target_source_mapping_and_scope_are_offline_contracts(case) -> None:
 def test_primary_ruleset_positive_and_negative_controls() -> None:
     ruleset = _configured_ruleset()
     adapter = LocalSemgrepAdapter(ruleset_path=ruleset)
-    positive = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive"))
-    negative = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "negative"))
+    positive = asyncio.run(
+        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
+    )
+    negative = asyncio.run(
+        adapter.analyze(str(RULESET_FIXTURE_ROOT), "negative/safe_worker.js")
+    )
 
     positive_data = positive["data"]
     detected = {item["rule_id"] for item in positive_data["findings"]}
@@ -99,6 +143,7 @@ def test_primary_ruleset_positive_and_negative_controls() -> None:
 
     negative_data = negative["data"]
     assert negative_data["files_scanned"] == 1
+    assert negative_data["scanned_files"] == ["negative/safe_worker.js"]
     assert negative_data["findings"] == []
 
 
