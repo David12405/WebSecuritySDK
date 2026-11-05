@@ -91,6 +91,9 @@ def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
         assert "--no-git-ignore" in argv
         assert "--no-rewrite-rule-ids" in argv
         assert "--dataflow-traces" in argv
+        assert "--json" in argv
+        assert f"--output={output_path}" in argv
+        assert not any(arg.startswith("--json-output") for arg in argv)
         assert "--exclude=.env*" in argv
         assert "--exclude=*.pem" in argv
         assert "--exclude=credentials.json" in argv
@@ -161,6 +164,72 @@ def test_semgrep_explicit_nested_file_is_the_command_target(tmp_path: Path):
     )
     assert result["data"]["files_scanned"] == 1
     assert result["data"]["scanned_files"] == ["positive/worker.js"]
+
+
+def test_semgrep_preserves_cli_dataflow_trace_with_relative_paths(tmp_path: Path):
+    repo = tmp_path / "repo"
+    approved = repo / "fixture"
+    worker = approved / "worker.js"
+    worker.parent.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    worker.write_text(
+        'const v = url.searchParams.get("x");\nconst w = v;\neval(w);\n', encoding="utf-8"
+    )
+    (approved / ".env.local").write_text("TOKEN=secret\n", encoding="utf-8")
+
+    def loc(path: str, line: int) -> dict:
+        return {
+            "path": path,
+            "start": {"line": line, "col": 1, "offset": 0},
+            "end": {"line": line, "col": 10, "offset": 9},
+        }
+
+    trace = {
+        "taint_source": ["CliLoc", [loc("fixture/worker.js", 1), 'url.searchParams.get("x")']],
+        "intermediate_vars": [
+            {"location": loc("fixture/worker.js", 1), "content": "v"},
+            {"location": loc("fixture/worker.js", 2), "content": "w"},
+        ],
+        "taint_sink": ["CliLoc", [loc("fixture/worker.js", 3), "eval(w)"]],
+    }
+
+    def result_for(path: str) -> dict:
+        return {
+            "check_id": "cloudflare-workers.tainted-code-injection",
+            "path": path,
+            "start": {"line": 3, "col": 1},
+            "end": {"line": 3, "col": 8},
+            "extra": {"message": "tainted", "severity": "ERROR", "dataflow_trace": trace},
+        }
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        assert "--dataflow-traces" in argv and "--json" in argv
+        output_path.write_text(
+            json.dumps(
+                {
+                    "results": [result_for("fixture/worker.js"), result_for("fixture/.env.local")],
+                    "errors": [],
+                    "paths": {"scanned": ["fixture/worker.js", "fixture/.env.local"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    result = run(semgrep.analyze_source(str(approved), runner=fake_runner))
+    exposed, redacted = result["data"]["findings"]
+    assert exposed["file"] == "worker.js"
+    normalized = exposed["dataflow_trace"]
+    assert normalized["taint_source"][0] == "CliLoc"
+    assert normalized["taint_source"][1][0]["path"] == "worker.js"
+    assert normalized["taint_sink"][1][0]["path"] == "worker.js"
+    assert normalized["taint_sink"][1][1] == "eval(w)"
+    assert [item["location"]["path"] for item in normalized["intermediate_vars"]] == [
+        "worker.js",
+        "worker.js",
+    ]
+    assert redacted["file"] == ".env.local"
+    assert redacted["dataflow_trace"] is None
 
 
 def test_semgrep_rejects_out_of_scope_scanned_path(tmp_path: Path):

@@ -583,6 +583,15 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
             "detected_rule_ids": sorted(detected),
             "missing_rule_ids": missing,
             "missing_trace_rule_ids": missing_trace,
+            "trace_keys_by_rule": {
+                str(item.get("rule_id")): (
+                    sorted(item["dataflow_trace"])
+                    if isinstance(item.get("dataflow_trace"), dict)
+                    else type(item.get("dataflow_trace")).__name__
+                )
+                for item in findings
+                if isinstance(item, dict)
+            },
             "ruleset_sha256": data.get("ruleset_sha256") or diagnostics["ruleset_sha256"],
             "execution_ref": data.get("execution_ref"),
             "source_revision": data.get("source_revision"),

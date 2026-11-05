@@ -365,7 +365,9 @@ async def analyze_source(
         temp = Path(temp_name)
         output_path, stderr_path = temp / "result.json", temp / "stderr.log"
         argv = [
-            executable, "scan", f"--json-output={output_path}",
+            # Primary --json output: Semgrep applies --dataflow-traces to the primary
+            # output format only, so a secondary --json-output file omits the traces.
+            executable, "scan", "--json", f"--output={output_path}",
             f"--config={configured_ruleset}", "--oss-only", "--metrics=off",
             "--disable-version-check", "--no-autofix", "--no-git-ignore",
             "--no-rewrite-rule-ids", "--dataflow-traces", "--max-target-bytes=1000000",

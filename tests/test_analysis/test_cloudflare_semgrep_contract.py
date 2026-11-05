@@ -121,6 +121,68 @@ def test_target_source_mapping_and_scope_are_offline_contracts(case) -> None:
     assert accepted is None and refusal and "outside" in refusal
 
 
+RECORDED_POSITIVE_OUTPUT = (
+    Path(__file__).resolve().parent / "data" / "semgrep_cloudflare_positive.json"
+)
+
+
+def _rebase_paths(value, prefix: str):
+    if isinstance(value, list):
+        return [_rebase_paths(item, prefix) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: (
+                f"{prefix}{item}"
+                if key == "path" and isinstance(item, str)
+                else [f"{prefix}{entry}" for entry in item]
+                if key == "scanned" and isinstance(item, list)
+                else _rebase_paths(item, prefix)
+            )
+            for key, item in value.items()
+        }
+    return value
+
+
+def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None:
+    recorded = json.loads(RECORDED_POSITIVE_OUTPUT.read_text(encoding="utf-8"))
+    seen_argv: list[str] = []
+
+    async def recorded_runner(argv, cwd, output_path, stderr_path) -> int:
+        seen_argv.extend(argv)
+        relative_root = RULESET_FIXTURE_ROOT.resolve().relative_to(Path(cwd).resolve())
+        prefix = "" if relative_root == Path(".") else f"{relative_root.as_posix()}/"
+        Path(output_path).write_text(
+            json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8"
+        )
+        return 0
+
+    adapter = LocalSemgrepAdapter(ruleset_path=DEFAULT_RULESET, runner=recorded_runner)
+    positive = asyncio.run(
+        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
+    )
+
+    assert "--dataflow-traces" in seen_argv
+    assert "--json" in seen_argv
+    assert not any(arg.startswith("--json-output") for arg in seen_argv)
+    data = positive["data"]
+    assert {item["rule_id"] for item in data["findings"]} == EXPECTED_RULE_IDS
+    assert data["scanned_files"] == ["positive/worker.js"]
+    assert all(item["dataflow_trace"] for item in data["findings"])
+    for item in data["findings"]:
+        sink_location = item["dataflow_trace"]["taint_sink"][1][0]
+        assert sink_location["path"] == "positive/worker.js"
+
+    request = make_shop_analysis_request_with_scope(
+        source_repo_path=str(RULESET_FIXTURE_ROOT.resolve()),
+        source_repository_ref=str(RULESET_FIXTURE_ROOT.resolve()),
+        testing_mode=TestingMode.WHITEBOX,
+    )
+    extraction = extract_sink_candidates(request, semgrep_payload=positive)
+    assert len(extraction.sink_candidates) == 3
+    assert all(sc.has_static_taint_flow for sc in extraction.sink_candidates)
+    assert all(sc.dataflow_steps for sc in extraction.sink_candidates)
+
+
 @pytest.mark.semgrep_cli
 @SEMGREP_REQUIRED
 def test_primary_ruleset_positive_and_negative_controls() -> None:
