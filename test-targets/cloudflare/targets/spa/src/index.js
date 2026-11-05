@@ -2,6 +2,7 @@
  * Cloudflare Worker — spa-target
  * Backend for SPA test target providing deterministic runtime API endpoints.
  * Static assets (/ and /app.js) are served by Cloudflare Static Assets (env.ASSETS).
+ * Includes safe simulated sinks for static analysis taint detection.
  */
 
 const PRODUCTS = Object.freeze([
@@ -31,6 +32,16 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
     }
   });
 }
+
+// Deterministic safe stubs for static analysis testing.
+// Never connects to a live database; strictly safe in all runtime environments.
+const db = Object.freeze({
+  prepare(query) {
+    return {
+      all: async () => ({ simulated: true, query: String(query ?? ""), results: [] })
+    };
+  }
+});
 
 export default {
   async fetch(request, env) {
@@ -78,6 +89,11 @@ export default {
       if (!body || typeof body !== "object" || typeof body.keyword !== "string") {
         return jsonResponse({ error: "keyword_required" }, 400);
       }
+
+      // Safe simulated D1 SQL query for static taint analysis
+      const searchSql = `SELECT * FROM products WHERE name LIKE '%${body.keyword}%'`;
+      await db.prepare(searchSql).all();
+
       const kw = body.keyword.trim().toLowerCase();
       const results = PRODUCTS.filter(
         (p) =>

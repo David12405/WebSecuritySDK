@@ -6,17 +6,20 @@ $$\text{Raw Tool Output} \rightarrow \text{EvidenceArtifactRecord} \rightarrow \
 
 ---
 
-> [!CAUTION]
-> **Reconnaissance Testing Only — Not Vulnerable Applications**
+> [!NOTE]
+> **Safe Ground-Truth Targets for M1 (Reconnaissance) & M2 (Whitebox Taint Analysis)**
 >
-> These Cloudflare applications are **NOT** vulnerable targets. They do **NOT** contain SQL injection, command injection, XSS, SSRF, or any other intentional exploitable vulnerabilities. All reflected inputs are strictly HTML-escaped.
+> These Cloudflare applications are **deterministic test targets**. They do **NOT** contain live, exploitable SQL injection, command injection, XSS, or SSRF vulnerabilities. All reflected inputs are HTML-escaped, and runtime execution is strictly protected.
 >
-> Their sole purpose is to serve as **deterministic ground-truth targets** for testing:
+> For static taint analysis (Module 2 / Semgrep ruleset), they include **safe simulated sink stubs** (`db.prepare`, `childProcess.exec`, `new Function` with runtime guards) modeling untrusted data flows from HTTP inputs to injection sinks without executing external commands or connecting to live databases.
+>
+> Their purpose is to serve as **deterministic ground-truth targets** for testing:
 > - HTTP reconnaissance & metadata collection
 > - Crawler endpoint and form discovery
 > - OpenAPI 3.x specification discovery and parsing
 > - Browser runtime discovery (fetch, XHR, and DOM click-triggered calls)
 > - Input parameter discovery (`QUERY`, `PATH`, `FORM`, `JSON_BODY`, `HEADER`, `COOKIE`, `DOM`)
+> - Static analysis taint detection and M1-to-M2 evidence correlation
 > - `TargetModel` construction and endpoint normalization
 
 ---

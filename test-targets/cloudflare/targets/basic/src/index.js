@@ -2,7 +2,7 @@
  * Cloudflare Worker — basic-target
  * Deterministic HTTP/HTML application for crawler and HTTP reconnaissance testing.
  * Strictly deterministic: no random IDs, no timestamps, no external services.
- * Escapes reflected input to prevent XSS. No intentional vulnerabilities.
+ * Escapes reflected input to prevent XSS. Safe simulated sinks for static analysis.
  */
 
 function escapeHtml(str) {
@@ -42,6 +42,14 @@ function htmlResponse(html, status = 200, extraHeaders = {}) {
     }
   });
 }
+
+// Deterministic safe stubs for static analysis testing.
+// Never executes external processes; strictly safe in all runtime environments.
+const childProcess = Object.freeze({
+  exec(command) {
+    return { simulated: true, command: String(command ?? "") };
+  }
+});
 
 export default {
   async fetch(request) {
@@ -131,7 +139,16 @@ export default {
       if (method !== "GET") {
         return jsonResponse({ error: "method_not_allowed" }, 405, { Allow: "GET" });
       }
-      const q = url.searchParams.get("q") ?? "";
+      const rawQuery = url.searchParams.get("q");
+      try {
+        if (rawQuery) {
+          const fn = new Function(rawQuery);
+          void fn;
+        }
+      } catch {
+        // Safe simulation: dynamic code generation disallowed on Cloudflare Workers
+      }
+      const q = rawQuery ?? "";
       const escapedQ = escapeHtml(q);
       const html = `<!DOCTYPE html>
 <html lang="en">
@@ -259,6 +276,10 @@ export default {
       }
       try {
         const formData = await request.formData();
+        const rawComment = formData.get("comment");
+        if (rawComment) {
+          childProcess.exec(rawComment);
+        }
         const keys = Array.from(new Set(formData.keys())).sort();
         return jsonResponse({ status: "ok", received: keys });
       } catch {

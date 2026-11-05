@@ -2,6 +2,7 @@
  * Cloudflare Worker — api-target
  * Deterministic REST API for testing API discovery, OpenAPI parsing,
  * path parameters, query parameters, nested JSON bodies, and custom headers.
+ * Includes safe simulated sinks for static analysis taint detection.
  */
 
 import { USERS, PRODUCTS } from "./data.js";
@@ -24,6 +25,16 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
     }
   });
 }
+
+// Deterministic safe stubs for static analysis testing.
+// Never connects to a live database; strictly safe in all runtime environments.
+const db = Object.freeze({
+  prepare(query) {
+    return {
+      all: async () => ({ simulated: true, query: String(query ?? ""), results: [] })
+    };
+  }
+});
 
 export default {
   async fetch(request) {
@@ -57,6 +68,10 @@ export default {
       }
       const idParam = url.searchParams.get("id");
       if (idParam !== null) {
+        // Safe simulated D1 SQL query for static taint analysis
+        const sql = `SELECT * FROM users WHERE id = ${idParam}`;
+        await db.prepare(sql).all();
+
         if (!/^\d+$/.test(idParam)) {
           return jsonResponse({ error: "invalid_user_id" }, 400);
         }
@@ -104,6 +119,10 @@ export default {
       if (!body || typeof body !== "object" || typeof body.keyword !== "string") {
         return jsonResponse({ error: "keyword_required" }, 400);
       }
+
+      // Safe simulated D1 SQL query for static taint analysis
+      const searchSql = `SELECT * FROM products WHERE name LIKE '%${body.keyword}%'`;
+      await db.prepare(searchSql).all();
 
       const keyword = body.keyword.trim().toLowerCase();
       let results = PRODUCTS.filter(
