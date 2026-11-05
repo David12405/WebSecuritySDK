@@ -13,7 +13,7 @@ rules:
         - "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
       technology:
         - cloudflare-workers
-    pattern-sources: &cloudflare_request_sources
+    pattern-sources:
       - pattern: $URL.searchParams.get(...)
       - pattern: await $REQUEST.json()
       - pattern: await $REQUEST.text()
@@ -37,7 +37,11 @@ rules:
       technology:
         - cloudflare-workers
         - cloudflare-d1
-    pattern-sources: *cloudflare_request_sources
+    pattern-sources:
+      - pattern: $URL.searchParams.get(...)
+      - pattern: await $REQUEST.json()
+      - pattern: await $REQUEST.text()
+      - pattern: $FORM.get(...)
     pattern-sinks:
       - pattern: $DB.prepare($QUERY)
 
@@ -55,7 +59,11 @@ rules:
         - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
       technology:
         - javascript
-    pattern-sources: *cloudflare_request_sources
+    pattern-sources:
+      - pattern: $URL.searchParams.get(...)
+      - pattern: await $REQUEST.json()
+      - pattern: await $REQUEST.text()
+      - pattern: $FORM.get(...)
     pattern-sinks:
       - pattern: $CHILD_PROCESS.exec($COMMAND, ...)
       - pattern: exec($COMMAND, ...)
