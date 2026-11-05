@@ -7,8 +7,9 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,6 +32,19 @@ MAX_FINDINGS = 500
 MAX_OPTIONAL_DEPTH = 6
 MAX_OPTIONAL_ENTRIES = 50
 MAX_OPTIONAL_STRING = 2_048
+SENSITIVE_SCAN_EXCLUDES = (
+    ".env*",
+    "*.der",
+    "*.jks",
+    "*.kdb",
+    "*.key",
+    "*.p12",
+    "*.pem",
+    "*.pfx",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+)
 _REGISTRY_RULESET = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -277,18 +291,20 @@ async def analyze_source(
         argv = [
             executable, "scan", f"--json-output={output_path}",
             f"--config={configured_ruleset}", "--oss-only", "--metrics=off",
-            "--disable-version-check", "--no-autofix", "--max-target-bytes=1000000",
+            "--disable-version-check", "--no-autofix", "--no-git-ignore",
+            "--no-rewrite-rule-ids", "--max-target-bytes=1000000",
             "--max-lines-per-finding=10", "--max-chars-per-line=200", "--timeout=5",
             "--timeout-threshold=3", "--jobs=1",
         ]
         argv.extend(f"--exclude={name}" for name in sorted(IGNORED_DIRS))
+        argv.extend(f"--exclude={name}" for name in SENSITIVE_SCAN_EXCLUDES)
         argv.append(relative_scan)
         execute = runner or _default_runner
         try:
             code = await asyncio.wait_for(
                 execute(argv, root, output_path, stderr_path), timeout=GLOBAL_TIMEOUT
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ToolError("E_TIMEOUT", "Semgrep timed out") from None
         if code != 0:
             raise ToolError("E_TOOL_FAILED", "Semgrep failed")
@@ -308,4 +324,4 @@ async def analyze_source(
     )
 
 
-__all__ = ["analyze_source", "SemgrepAnalysisResult", "SemgrepFinding"]
+__all__ = ["SemgrepAnalysisResult", "SemgrepFinding", "analyze_source"]

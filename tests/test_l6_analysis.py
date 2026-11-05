@@ -86,6 +86,11 @@ def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
     (tmp_path / "main.py").write_text("x = 1", encoding="utf-8")
 
     async def fake_runner(argv, cwd, output_path, stderr_path):
+        assert "--no-git-ignore" in argv
+        assert "--no-rewrite-rule-ids" in argv
+        assert "--exclude=.env*" in argv
+        assert "--exclude=*.pem" in argv
+        assert "--exclude=credentials.json" in argv
         Path(output_path).write_text(json.dumps({"results": [], "errors": []}), encoding="utf-8")
         return 0
 
