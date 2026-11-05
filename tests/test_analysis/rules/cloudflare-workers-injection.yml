@@ -1,0 +1,17 @@
+rules:
+  - id: cloudflare-workers.unsafe-eval-injection
+    languages:
+      - javascript
+      - typescript
+    message: Dynamic code execution is an injection sink in a Cloudflare Worker.
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe:
+        - "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      technology:
+        - cloudflare-workers
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
