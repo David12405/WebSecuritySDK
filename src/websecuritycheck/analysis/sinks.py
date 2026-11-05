@@ -194,6 +194,10 @@ class SinkExtractionResult(StrictModel):
     ruleset_sha256: str | None = None
     execution_ref: str | None = None
     source_revision: str | None = None
+    source_repository_ref: str | None = None
+    source_repo_path: str | None = None
+    source_tree_sha256: str | None = None
+    worktree_dirty: bool | None = None
     limitations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -843,6 +847,10 @@ def extract_sink_candidates(
     provenance_ruleset_sha256 = raw_data.get("ruleset_sha256")
     provenance_execution_ref = raw_data.get("execution_ref")
     provenance_source_revision = raw_data.get("source_revision")
+    provenance_source_repository_ref = raw_data.get("source_repository_ref")
+    provenance_source_repo_path = raw_data.get("source_repo_path")
+    provenance_source_tree_sha256 = raw_data.get("source_tree_sha256")
+    provenance_worktree_dirty = raw_data.get("worktree_dirty")
     scan_path = str(raw_data.get("path") or ".")
     scanned_files_raw = raw_data.get("scanned_files")
     scanned_files = (
@@ -1117,8 +1125,13 @@ def extract_sink_candidates(
                 "ruleset_path": provenance_ruleset_path,
                 "ruleset_sha256": provenance_ruleset_sha256,
                 "source_revision": provenance_source_revision,
+                "source_repository_ref": provenance_source_repository_ref,
+                "source_repo_path": provenance_source_repo_path,
+                "source_tree_sha256": provenance_source_tree_sha256,
+                "worktree_dirty": provenance_worktree_dirty,
                 "execution_ref": provenance_execution_ref,
                 "scan_path": scan_path,
+                "derivation_modality": "static_source_snapshot",
             },
         }
 
@@ -1171,8 +1184,13 @@ def extract_sink_candidates(
                 "ruleset_path": provenance_ruleset_path,
                 "ruleset_sha256": provenance_ruleset_sha256,
                 "source_revision": provenance_source_revision,
+                "source_repository_ref": provenance_source_repository_ref,
+                "source_repo_path": provenance_source_repo_path,
+                "source_tree_sha256": provenance_source_tree_sha256,
+                "worktree_dirty": provenance_worktree_dirty,
                 "execution_ref": provenance_execution_ref,
                 "scan_path": scan_path,
+                "derivation_modality": "static_source_snapshot",
             },
             redaction_applied=acc.redaction_applied,
             truncated=is_truncated,
@@ -1242,6 +1260,18 @@ def extract_sink_candidates(
         source_revision=(
             str(provenance_source_revision) if provenance_source_revision else None
         ),
+        source_repository_ref=(
+            str(provenance_source_repository_ref) if provenance_source_repository_ref else None
+        ),
+        source_repo_path=(
+            str(provenance_source_repo_path) if provenance_source_repo_path else None
+        ),
+        source_tree_sha256=(
+            str(provenance_source_tree_sha256) if provenance_source_tree_sha256 else None
+        ),
+        worktree_dirty=(
+            bool(provenance_worktree_dirty) if provenance_worktree_dirty is not None else None
+        ),
         limitations=sorted(limitations),
         warnings=sorted(warnings),
     )
@@ -1278,8 +1308,19 @@ async def aextract_sink_candidates(
 
     active_analyzer = analyzer or LocalSemgrepAdapter()
 
+    approved_repo = None
+    if request.target_model.scope_rules:
+        approved_repo = request.target_model.scope_rules.source_repository_ref
+
     try:
-        payload = await active_analyzer.analyze(authorized_path or "", subpath=subpath)
+        import inspect
+        sig = inspect.signature(active_analyzer.analyze)
+        if "source_repository_ref" in sig.parameters:
+            payload = await active_analyzer.analyze(
+                authorized_path or "", subpath=subpath, source_repository_ref=approved_repo
+            )
+        else:
+            payload = await active_analyzer.analyze(authorized_path or "", subpath=subpath)
     except ToolError as exc:
         return SinkExtractionResult(
             limitations=[f"Semgrep static analysis failed ({exc.code}): {exc.message}"]

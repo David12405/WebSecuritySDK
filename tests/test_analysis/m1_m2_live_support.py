@@ -21,8 +21,6 @@ from mcp_servers.websec_tools.recon import browser, openapi, zap
 from websecuritycheck.analysis.correlation import (
     ApprovedRulesetEntry,
     ApprovedRuleSpec,
-    CorrelationKind,
-    CorrelationStatus,
     CorrelationTrustPolicy,
     RuleMode,
     build_correlation_envelope,
@@ -30,6 +28,10 @@ from websecuritycheck.analysis.correlation import (
 )
 from websecuritycheck.analysis.cve import InjectionSubtype, extract_cve_candidates
 from websecuritycheck.analysis.inputs import extract_input_candidates
+from websecuritycheck.analysis.route_binding import (
+    REVIEWED_STATIC_ROUTE_PRODUCER,
+    extract_route_bindings,
+)
 from websecuritycheck.analysis.semgrep_adapter import (
     LocalSemgrepAdapter,
     compute_ruleset_sha256,
@@ -344,6 +346,7 @@ def trust_policy(ruleset_digest: str) -> CorrelationTrustPolicy:
                 ),
             ),
         ),
+        trusted_route_producers=(REVIEWED_STATIC_ROUTE_PRODUCER,),
     )
 
 
@@ -782,37 +785,60 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
             f"detected: {sorted(detected_rule_ids)}"
         )
 
+    # M2-T03b: Deterministic AST Route Binding Extraction
+    route_result = extract_route_bindings(
+        request,
+        existing_evidence_ids={
+            item.evidence_id
+            for item in [*request.evidence_records, *sink_result.analysis_evidence_records]
+        },
+    )
+    request_with_routes = request.model_copy(
+        update={
+            "evidence_records": [
+                *request.evidence_records,
+                *route_result.analysis_evidence_records,
+            ]
+        }
+    )
+
     policy = trust_policy(compute_ruleset_sha256(ruleset))
     correlation = correlate_evidence(
-        request,
+        request_with_routes,
         input_result=input_result,
         sink_result=sink_result,
         cve_result=cve_result,
-        route_binding_artifacts=(),
+        route_binding_artifacts=route_result.route_binding_artifacts,
         trust_policy=policy,
     )
-    forbidden = [
-        record.correlation_id
-        for record in correlation.records
-        if record.kind in {CorrelationKind.INPUT_SINK, CorrelationKind.ENDPOINT_SINK}
-        and record.status is CorrelationStatus.VERIFIED
-    ]
-    assert not forbidden, f"correlation cannot be VERIFIED without route binding: {forbidden}"
 
     limitations = sorted(
         {
             *input_result.limitations,
             *sink_result.limitations,
             *cve_result.limitations,
+            *route_result.limitations,
             *correlation.limitations,
         }
     )
-    warnings = sorted({*input_result.warnings, *sink_result.warnings, *correlation.warnings})
+    warnings = sorted(
+        {
+            *input_result.warnings,
+            *sink_result.warnings,
+            *cve_result.warnings,
+            *route_result.warnings,
+            *correlation.warnings,
+        }
+    )
+    all_analysis_evd = [
+        *sink_result.analysis_evidence_records,
+        *route_result.analysis_evidence_records,
+    ]
     output = Module2Output(
         assessment_id=request.target_model.assessment_id,
         target_id=request.target_model.target_id,
         generated_at=datetime.now(UTC),
-        analysis_evidence_records=sink_result.analysis_evidence_records,
+        analysis_evidence_records=all_analysis_evd,
         inputs=input_result.inputs,
         sink_candidates=sink_result.sink_candidates,
         cve_candidates=list(cve_result.cve_candidates),
@@ -820,17 +846,19 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
         limitations=limitations,
         warnings=warnings,
     )
-    validate_module2_handoff(output, request)
+    validate_module2_handoff(output, request_with_routes)
     envelope = build_correlation_envelope(
         output,
         correlation,
-        request,
+        request_with_routes,
         expected_trust_policy_fingerprint=policy.fingerprint,
     )
     target_report.update(
         {
             "status": "completed",
             "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            "route_bindings": len(route_result.route_binding_artifacts),
+            "correlations": len(correlation.records),
             "scan": {
                 "semgrep_version": sink_result.semgrep_version,
                 "scanned_files": sink_result.scanned_files,

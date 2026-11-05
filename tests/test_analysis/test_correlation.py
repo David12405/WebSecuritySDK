@@ -188,11 +188,14 @@ def test_verified_input_sink_requires_full_trust_chain():
     rec = result.records[0]
     assert rec.kind == CorrelationKind.INPUT_SINK
     assert rec.status == CorrelationStatus.VERIFIED
-    assert rec.confidence == ConfidenceLevel.HIGH
+    # M2-T03c: Relation evidence deriving from the same static source snapshot
+    # assesses as SHARED and is capped at MEDIUM confidence
+    assert rec.confidence == ConfidenceLevel.MEDIUM
+    assert rec.independence.status == IndependenceStatus.SHARED
+    assert any("SHARED_SOURCE_SNAPSHOT" in r for r in rec.independence.reasons)
     assert rec.endpoint_id == ep.endpoint_id
     assert rec.input_ref == "INP-001"
     assert rec.sink_ref == sink_res.sink_candidates[0].sink_id
-    assert rec.independence.status == IndependenceStatus.INDEPENDENT
     assert "EVD-050" in rec.relation_evidence_refs
 
 
@@ -310,9 +313,12 @@ def test_cloudflare_fetch_api_accessors():
     assert InputLocation.JSON_BODY in acc_body.locations
 
     # 5. Dynamic expressions
-    assert parse_taint_source_accessor("await request.json()").resolution == AccessorResolution.DYNAMIC_KEY
-    assert parse_taint_source_accessor("url.searchParams.get(dynKey)").resolution == AccessorResolution.DYNAMIC_KEY
-    assert parse_taint_source_accessor("formData.get(dynKey)").resolution == AccessorResolution.DYNAMIC_KEY
+    res_json = parse_taint_source_accessor("await request.json()")
+    assert res_json.resolution == AccessorResolution.DYNAMIC_KEY
+    res_url = parse_taint_source_accessor("url.searchParams.get(dynKey)")
+    assert res_url.resolution == AccessorResolution.DYNAMIC_KEY
+    res_form = parse_taint_source_accessor("formData.get(dynKey)")
+    assert res_form.resolution == AccessorResolution.DYNAMIC_KEY
 
 
 def test_name_similarity_alone_not_correlated():

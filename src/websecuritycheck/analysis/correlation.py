@@ -7,7 +7,6 @@ SinkCandidate, and CVECandidate within OWASP Top 10:2025 A05: Injection scope.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -206,6 +205,40 @@ class ApprovedRulesetEntry(BaseModel):
     rules: tuple[ApprovedRuleSpec, ...] = ()
 
 
+PINNED_CLOUDFLARE_RULESET_SHA256 = (
+    "11923c354378d4977056f74072d780cc3b5639cfb85b00f404dd10a144166f2e"
+)
+
+REVIEWED_CLOUDFLARE_RULESET_ENTRY = ApprovedRulesetEntry(
+    ruleset_id="rules/cloudflare",
+    sha256=PINNED_CLOUDFLARE_RULESET_SHA256,
+    review_ref="SECURITY-REVIEW-2026-M2-T03C",
+    rules=(
+        ApprovedRuleSpec(
+            rule_id="cloudflare-workers.tainted-code-injection",
+            mode=RuleMode.TAINT,
+            sink_kind=SinkKind.CODE_EVAL,
+            subtype=InjectionSubtype.CODE_INJECTION,
+            cwe_ids=frozenset({CweId("CWE-94")}),
+        ),
+        ApprovedRuleSpec(
+            rule_id="cloudflare-workers.tainted-command-injection",
+            mode=RuleMode.TAINT,
+            sink_kind=SinkKind.OS_COMMAND,
+            subtype=InjectionSubtype.OS_COMMAND_INJECTION,
+            cwe_ids=frozenset({CweId("CWE-78")}),
+        ),
+        ApprovedRuleSpec(
+            rule_id="cloudflare-workers.tainted-d1-sql-injection",
+            mode=RuleMode.TAINT,
+            sink_kind=SinkKind.SQL_QUERY,
+            subtype=InjectionSubtype.SQL_INJECTION,
+            cwe_ids=frozenset({CweId("CWE-89")}),
+        ),
+    ),
+)
+
+
 class TrustedRouteProducer(BaseModel):
     """Registered trusted producer capable of emitting verified RouteHandlerBinding artifacts."""
 
@@ -386,6 +419,8 @@ class RouteHandlerBinding(BaseModel):
     evidence_ref: EvidenceId
     execution_ref: str = Field(min_length=1)
     source_revision: str = Field(min_length=1)
+    source_tree_sha256: str | None = None
+    source_repository_ref: str | None = None
 
 
 class TaintSourceAccessor(BaseModel):
@@ -413,6 +448,8 @@ class InjectionSinkScope(BaseModel):
     provenance_gaps: tuple[str, ...] = ()
     flow_trust: FlowTrust
     source_revision: str | None = None
+    source_tree_sha256: str | None = None
+    source_repository_ref: str | None = None
     reason: str
 
 
@@ -663,6 +700,7 @@ def classify_injection_sink(
     exec_ref = str(evidence_record.execution_ref or "").strip()
     source_repo_ref = str(prov.get("source_repository_ref") or "").strip()
     source_rev = str(prov.get("source_revision") or "").strip()
+    source_tree_sha256 = str(prov.get("source_tree_sha256") or "").strip()
 
     all_rule_ids = set()
     if metadata:
@@ -790,6 +828,8 @@ def classify_injection_sink(
         provenance_gaps=tuple(sorted(provenance_gaps)),
         flow_trust=flow_trust,
         source_revision=source_rev or None,
+        source_tree_sha256=source_tree_sha256 or None,
+        source_repository_ref=source_repo_ref or None,
         reason=(
             f"Evaluated sink {sink_id}: scope={scope_status.value} ({scope_basis}), "
             f"provenance={rule_prov_status.value}, flow_trust={flow_trust.value}"
@@ -976,7 +1016,8 @@ def parse_taint_source_accessor(snippet: str | None) -> TaintSourceAccessor:
             pattern_id="js_body_property",
         )
 
-    # Check dynamic key attempts: e.g. request.args[var], searchParams.get(var), or await request.json()
+    # Check dynamic key attempts: e.g. request.args[var], searchParams.get(var),
+    # or await request.json()
     if _DYNAMIC_ACCESSOR_RE.search(clean_snip):
         return TaintSourceAccessor(resolution=AccessorResolution.DYNAMIC_KEY)
 
@@ -1090,6 +1131,7 @@ def verify_route_binding_artifact(
     ):
         return None, f"INVALID_LINE_SPAN:{start_line}-{end_line}"
 
+    src_tree_hash = str(prov.get("source_tree_sha256") or "").strip() or None
     binding = RouteHandlerBinding(
         endpoint_id=ep_id,
         method=method_name,
@@ -1100,6 +1142,8 @@ def verify_route_binding_artifact(
         evidence_ref=evd_id,
         execution_ref=exec_ref,
         source_revision=src_rev,
+        source_tree_sha256=src_tree_hash,
+        source_repository_ref=src_repo_ref or None,
     )
     return binding, "VERIFIED"
 
@@ -1164,6 +1208,30 @@ def assess_independence(
     if len(exec_refs) <= 1:
         single_ref = next(iter(exec_refs)) if exec_refs else "none"
         reasons.append(f"SINGLE_EXECUTION_REF:{single_ref}")
+
+    # Check for shared source snapshot across SOURCE_ARTIFACT records
+    # If all supporting evidence records are SOURCE_ARTIFACT and observations is empty,
+    # and they share the same source snapshot
+    # (source_tree_sha256 or (source_repository_ref, source_revision)),
+    # then even with distinct execution_ref values, they derive from the same static snapshot
+    # and must not be marked INDEPENDENT.
+    if (
+        evidence
+        and all(evd.artifact_type == ArtifactType.SOURCE_ARTIFACT for evd in evidence)
+        and not observations
+    ):
+        snapshots = set()
+        for evd in evidence:
+            prov = evd.provenance or {}
+            tree_hash = prov.get("source_tree_sha256")
+            repo_ref = prov.get("source_repository_ref")
+            rev = prov.get("source_revision")
+            snapshots.add((repo_ref, rev, tree_hash))
+
+        if len(snapshots) == 1:
+            snap = next(iter(snapshots))
+            rev_label = snap[1] or snap[2] or "unknown"
+            reasons.append(f"SHARED_SOURCE_SNAPSHOT:{rev_label}")
 
     if reasons:
         return IndependenceAssessment(
@@ -1606,10 +1674,18 @@ def correlate_evidence(
             matched_b = matching_bindings[0]
 
             # Check revision alignment
+            rev_mismatch = False
             if (
                 not scope_res.source_revision
                 or scope_res.source_revision != matched_b.source_revision
+            ) or (
+                scope_res.source_tree_sha256
+                and matched_b.source_tree_sha256
+                and scope_res.source_tree_sha256 != matched_b.source_tree_sha256
             ):
+                rev_mismatch = True
+
+            if rev_mismatch:
                 diagnostics.append(
                     CorrelationDiagnostic(
                         subject_ref=snk.sink_id,
@@ -1777,15 +1853,139 @@ def correlate_evidence(
             correlated_any = True
 
         if not correlated_any:
-            diagnostics.append(
-                CorrelationDiagnostic(
-                    subject_ref=snk.sink_id,
-                    stage="input_sink",
-                    outcome="UNRESOLVED",
-                    code="NO_MATCHING_ROUTE_BINDING",
-                    reason=f"Sink {snk.sink_id} has no matching verified route-handler binding",
+            # Fallback for sinks inside an unambiguous route handler without taint trace
+            # (e.g. Semgrep OSS runs where dataflow trace is unavailable or pattern mode)
+            snk_file = normalize_sink_file_path(snk.file_path)
+            matching_bindings = [
+                b
+                for b in bindings_by_file.get(snk_file, [])
+                if b.start_line <= snk.start_line <= b.end_line
+            ]
+
+            if len(matching_bindings) > 1:
+                diagnostics.append(
+                    CorrelationDiagnostic(
+                        subject_ref=snk.sink_id,
+                        stage="input_sink",
+                        outcome="UNRESOLVED",
+                        code="AMBIGUOUS_ROUTE_BINDING",
+                        reason=(
+                            f"Sink {snk.file_path}:{snk.start_line} "
+                            "intersects multiple bindings"
+                        ),
+                    )
                 )
-            )
+            elif len(matching_bindings) == 1:
+                matched_b = matching_bindings[0]
+                # Check revision alignment
+                rev_mismatch = False
+                if (
+                    scope_res.source_revision
+                    and matched_b.source_revision
+                    and scope_res.source_revision != matched_b.source_revision
+                ) or (
+                    scope_res.source_tree_sha256
+                    and matched_b.source_tree_sha256
+                    and scope_res.source_tree_sha256 != matched_b.source_tree_sha256
+                ):
+                    rev_mismatch = True
+                    diagnostics.append(
+                        CorrelationDiagnostic(
+                            subject_ref=snk.sink_id,
+                            stage="input_sink",
+                            outcome="UNRESOLVED",
+                            code="REVISION_UNLINKED",
+                            reason=(
+                                f"Revision/tree mismatch between sink "
+                            f"({scope_res.source_revision}, "
+                                f"{scope_res.source_tree_sha256}) and binding "
+                                f"({matched_b.source_revision}, {matched_b.source_tree_sha256})"
+                            ),
+                        )
+                    )
+
+                if not rev_mismatch and scope_res.rule_provenance == RuleProvenanceStatus.VERIFIED:
+                    binding_evd = all_request_evd.get(matched_b.evidence_ref)
+                    rel_evd = [evd]
+                    if binding_evd:
+                        rel_evd.append(binding_evd)
+
+                    ind_assess = assess_independence(rel_evd, [])
+                    caps: list[tuple[ConfidenceLevel, str]] = []
+                    if ind_assess.status != IndependenceStatus.INDEPENDENT:
+                        caps.append(
+                            (ConfidenceLevel.MEDIUM, f"INDEPENDENCE_{ind_assess.status.value}")
+                        )
+
+                    matched_ep = endpoint_map.get(matched_b.endpoint_id)
+                    if matched_ep and not matched_ep.runtime_observed:
+                        caps.append((ConfidenceLevel.MEDIUM, "ENDPOINT_NOT_RUNTIME_OBSERVED"))
+
+                    if man.redaction_applied or man.truncated:
+                        caps.append((ConfidenceLevel.MEDIUM, "MANIFEST_REDACTION_OR_TRUNCATION"))
+
+                    conf, applied_caps = evaluate_correlation_confidence(
+                        CorrelationKind.ENDPOINT_SINK,
+                        CorrelationStatus.PARTIAL,
+                        base_confidence=ConfidenceLevel.LOW,
+                        caps=[(snk.confidence, "SINK_CONFIDENCE_CAP"), *caps],
+                    )
+
+                    key = correlation_identity_key(
+                        CorrelationKind.ENDPOINT_SINK,
+                        matched_b.endpoint_id,
+                        None,
+                        None,
+                        snk.file_path,
+                        snk.start_line,
+                        snk.sink_kind,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    cor_id = CorrelationId(
+                        f"COR-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]}"
+                    )
+                    assert scope_res.subtype is not None
+
+                    rec = CorrelationRecord(
+                        correlation_id=cor_id,
+                        kind=CorrelationKind.ENDPOINT_SINK,
+                        status=CorrelationStatus.PARTIAL,
+                        confidence=conf,
+                        injection_subtype=scope_res.subtype,
+                        vulnerability_category=SUBTYPE_TO_CATEGORY.get(scope_res.subtype),
+                        endpoint_id=matched_b.endpoint_id,
+                        sink_ref=snk.sink_id,
+                        sink_relationship=SinkRelationship.UNVERIFIED_STATIC_SINK,
+                        existence_evidence_refs=tuple(sorted(set(snk.evidence_refs))),
+                        relation_evidence_refs=tuple(
+                            sorted({EvidenceId(str(e.evidence_id)) for e in rel_evd})
+                        ),
+                        independent_relation_source_count=ind_assess.distinct_execution_count,
+                        independence=ind_assess,
+                        missing_links=("MISSING_DATAFLOW_TRACE",),
+                        confidence_caps_applied=applied_caps,
+                        rationale=(
+                            f"Verified sink {snk.sink_id} falls within route "
+                            f"{matched_b.endpoint_id} handler ({matched_b.file_path}:"
+                            f"{matched_b.start_line}-{matched_b.end_line}) but lacks dataflow trace"
+                        ),
+                    )
+                    candidate_records.append(rec)
+                    correlated_any = True
+
+            if not correlated_any:
+                diagnostics.append(
+                    CorrelationDiagnostic(
+                        subject_ref=snk.sink_id,
+                        stage="input_sink",
+                        outcome="UNRESOLVED",
+                        code="NO_MATCHING_ROUTE_BINDING",
+                        reason=f"Sink {snk.sink_id} has no matching verified route-handler binding",
+                    )
+                )
 
     # Stage 4: CVE-Technology Correlation
     cve_tech_records: list[CorrelationRecord] = []
@@ -2191,8 +2391,7 @@ async def acorrelate_evidence(
     trust_policy: CorrelationTrustPolicy | None = None,
 ) -> CorrelationResult:
     """Asynchronous wrapper for deterministic evidence correlation."""
-    return await asyncio.to_thread(
-        correlate_evidence,
+    return correlate_evidence(
         request,
         input_result=input_result,
         sink_result=sink_result,

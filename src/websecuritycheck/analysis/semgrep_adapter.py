@@ -8,6 +8,8 @@ import os
 import re
 import subprocess
 import uuid
+
+from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, Protocol, runtime_checkable
 
@@ -47,7 +49,13 @@ _IGNORED_DIRS = frozenset(
 class AsyncSourceAnalysisPort(Protocol):
     """Asynchronous port interface for running static source analysis."""
 
-    async def analyze(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
+    async def analyze(
+        self,
+        target_root: str,
+        subpath: str = ".",
+        *,
+        source_repository_ref: str | None = None,
+    ) -> dict[str, Any]:
         """Return a Layer 6 Semgrep envelope or raw Semgrep JSON dictionary."""
         ...
 
@@ -153,29 +161,157 @@ def _find_git_root(path: Path) -> Path | None:
     return None
 
 
-def _source_revision(target_root: str) -> str | None:
-    git_root = _find_git_root(Path(target_root).resolve())
-    if git_root is None:
-        return None
-    try:
-        completed = subprocess.run(
-            [
-                "git",
-                "-c",
-                f"safe.directory={git_root.as_posix()}",
-                "rev-parse",
-                "HEAD",
-            ],
-            cwd=git_root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
+@dataclass(frozen=True)
+class SourceSnapshotInfo:
+    """Deterministic snapshot metadata for static source verification."""
+
+    source_revision: str | None
+    git_head: str | None
+    tree_sha256: str | None
+    is_dirty: bool
+    error: str | None = None
+
+
+def resolve_source_snapshot(target_root: str | Path, subpath: str = ".") -> SourceSnapshotInfo:
+    """Deterministically resolve source snapshot revision, tree hash, and dirty status."""
+    resolved_root = Path(target_root).resolve()
+    if subpath and subpath != ".":
+        target_path = (resolved_root / subpath).resolve()
+    else:
+        target_path = resolved_root
+
+    if not target_path.exists():
+        return SourceSnapshotInfo(
+            source_revision=None,
+            git_head=None,
+            tree_sha256=None,
+            is_dirty=False,
+            error=f"Target path does not exist: {target_path}",
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    revision = completed.stdout.strip()
-    return revision if completed.returncode == 0 and revision else None
+
+    # Compute deterministic tree_sha256
+    files_to_hash: list[tuple[str, Path]] = []
+    if target_path.is_file():
+        if target_path.is_symlink():
+            return SourceSnapshotInfo(
+                source_revision=None,
+                git_head=None,
+                tree_sha256=None,
+                is_dirty=False,
+                error=f"Symlinked source file is not permitted: {target_path}",
+            )
+        files_to_hash.append((target_path.name, target_path))
+    else:
+        for candidate in sorted(target_path.rglob("*")):
+            if candidate.is_symlink():
+                return SourceSnapshotInfo(
+                    source_revision=None,
+                    git_head=None,
+                    tree_sha256=None,
+                    is_dirty=False,
+                    error=f"Symlinked source file is not permitted: {candidate}",
+                )
+            try:
+                rel = candidate.relative_to(target_path)
+            except ValueError:
+                continue
+            if any(part in _IGNORED_DIRS for part in rel.parts):
+                continue
+            if candidate.is_file():
+                files_to_hash.append((rel.as_posix(), candidate))
+
+    hasher = hashlib.sha256()
+    for rel_posix, file_path in sorted(files_to_hash, key=lambda x: x[0]):
+        rel_bytes = rel_posix.encode("utf-8")
+        hasher.update(len(rel_bytes).to_bytes(8, "big"))
+        hasher.update(rel_bytes)
+        try:
+            file_content = file_path.read_bytes()
+        except OSError as exc:
+            return SourceSnapshotInfo(
+                source_revision=None,
+                git_head=None,
+                tree_sha256=None,
+                is_dirty=False,
+                error=f"Failed to read source file {file_path}: {exc}",
+            )
+        hasher.update(len(file_content).to_bytes(8, "big"))
+        hasher.update(file_content)
+    tree_sha256 = hasher.hexdigest() if files_to_hash else None
+
+    # Resolve Git metadata
+    git_root = _find_git_root(resolved_root)
+    git_head: str | None = None
+    is_dirty = False
+
+    if git_root is not None:
+        try:
+            completed_head = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    f"safe.directory={git_root.as_posix()}",
+                    "rev-parse",
+                    "HEAD",
+                ],
+                cwd=git_root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if completed_head.returncode == 0:
+                head_str = completed_head.stdout.strip()
+                if head_str and len(head_str) >= 7 and "\n" not in head_str:
+                    git_head = head_str
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        if git_head is not None:
+            try:
+                rel_to_git = target_path.relative_to(git_root).as_posix()
+            except ValueError:
+                rel_to_git = "."
+
+            try:
+                status_cmd = [
+                    "git",
+                    "-c",
+                    f"safe.directory={git_root.as_posix()}",
+                    "status",
+                    "--porcelain=v1",
+                    "-z",
+                    "--untracked-files=all",
+                ]
+                if rel_to_git != ".":
+                    status_cmd.extend(["--", rel_to_git])
+
+                completed_status = subprocess.run(
+                    status_cmd,
+                    cwd=git_root,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if completed_status.returncode == 0:
+                    status_out = completed_status.stdout.strip()
+                    is_dirty = bool(status_out)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+    return SourceSnapshotInfo(
+        source_revision=git_head,
+        git_head=git_head,
+        tree_sha256=tree_sha256,
+        is_dirty=is_dirty,
+        error=None,
+    )
+
+
+def _source_revision(target_root: str) -> str | None:
+    return resolve_source_snapshot(target_root).source_revision
+
 
 
 def validate_source_analysis_scope(
@@ -391,7 +527,13 @@ class LocalSemgrepAdapter:
         self._ruleset_path = ruleset_path
         self._runner = runner
 
-    async def analyze(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
+    async def analyze(
+        self,
+        target_root: str,
+        subpath: str = ".",
+        *,
+        source_repository_ref: str | None = None,
+    ) -> dict[str, Any]:
         # 1. Verify Layer 6 startup environment variables so line 271-272 of Layer 6
         #    cannot fail unpredictably or accept an unapproved remote ruleset.
         validated_env_ruleset = _validate_layer6_startup_env()
@@ -409,10 +551,14 @@ class LocalSemgrepAdapter:
             )
 
         ruleset_ref = Path(approved_ruleset).name
-        ruleset_sha256 = compute_ruleset_sha256(approved_ruleset)
         execution_ref = f"EXEC-{uuid.uuid4().int}"
-        source_revision = _source_revision(target_root)
         base_runner = self._runner or l6_semgrep._default_runner
+
+        # Pre-scan TOCTOU capture
+        pre_ruleset_sha256 = compute_ruleset_sha256(approved_ruleset)
+        pre_snapshot = resolve_source_snapshot(target_root, subpath)
+        if pre_snapshot.error:
+            raise ToolError("E_TOOL_UNAVAILABLE", pre_snapshot.error)
 
         # 3. Bind approved_ruleset into a per-call runner closure (zero os.environ mutation)
         async def _isolated_runner(
@@ -434,15 +580,41 @@ class LocalSemgrepAdapter:
         envelope_result = await l6_semgrep.analyze_source(
             target_root, subpath, runner=_isolated_runner
         )
+
+        # Post-scan TOCTOU verification
+        post_ruleset_sha256 = compute_ruleset_sha256(approved_ruleset)
+        post_snapshot = resolve_source_snapshot(target_root, subpath)
+        if pre_ruleset_sha256 != post_ruleset_sha256:
+            raise ToolError(
+                "E_TOOL_FAILED",
+                "Provenance integrity check failed: ruleset mutated during Semgrep execution",
+            )
+        if (
+            pre_snapshot.git_head != post_snapshot.git_head
+            or pre_snapshot.tree_sha256 != post_snapshot.tree_sha256
+        ):
+            raise ToolError(
+                "E_TOOL_FAILED",
+                "Provenance integrity check failed: source files mutated during Semgrep execution",
+            )
+
         # 4. Stamp accurate per-invocation ruleset provenance onto the returned envelope
         if isinstance(envelope_result, dict) and isinstance(envelope_result.get("data"), dict):
-            envelope_result["data"]["ruleset"] = "local-approved"
-            envelope_result["data"]["ruleset_ref"] = ruleset_ref
-            envelope_result["data"]["ruleset_path"] = approved_ruleset
-            envelope_result["data"]["ruleset_sha256"] = ruleset_sha256
-            envelope_result["data"]["execution_ref"] = execution_ref
-            if source_revision is not None:
-                envelope_result["data"]["source_revision"] = source_revision
+            data = envelope_result["data"]
+            data["ruleset"] = "local-approved"
+            data["ruleset_ref"] = ruleset_ref
+            data["ruleset_path"] = approved_ruleset
+            data["ruleset_sha256"] = pre_ruleset_sha256
+            data["execution_ref"] = execution_ref
+            data["source_repo_path"] = str(Path(target_root).resolve())
+            if source_repository_ref is not None:
+                data["source_repository_ref"] = source_repository_ref
+            if pre_snapshot.source_revision is not None:
+                data["source_revision"] = pre_snapshot.source_revision
+            if pre_snapshot.tree_sha256 is not None:
+                data["source_tree_sha256"] = pre_snapshot.tree_sha256
+            data["worktree_dirty"] = pre_snapshot.is_dirty
+            data["derivation_modality"] = "static_source_snapshot"
         return envelope_result
 
     def run_sync(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
@@ -461,7 +633,9 @@ class LocalSemgrepAdapter:
 __all__ = [
     "AsyncSourceAnalysisPort",
     "LocalSemgrepAdapter",
+    "SourceSnapshotInfo",
     "compute_ruleset_sha256",
+    "resolve_source_snapshot",
     "validate_offline_ruleset_path",
     "validate_source_analysis_scope",
 ]
