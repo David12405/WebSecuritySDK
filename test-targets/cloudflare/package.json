@@ -12,6 +12,7 @@
     "deploy:basic": "wrangler deploy --config targets/basic/wrangler.jsonc",
     "deploy:api": "wrangler deploy --config targets/api/wrangler.jsonc",
     "deploy:spa": "wrangler deploy --config targets/spa/wrangler.jsonc",
+    "deploy:all": "npm run deploy:basic && npm run deploy:api && npm run deploy:spa",
     "test": "node --test integration-tests/",
     "test:offline": "node --test integration-tests/ground-truth.test.mjs",
     "test:browser": "playwright test"
