@@ -1,9 +1,10 @@
 rules:
-  - id: cloudflare-workers.unsafe-eval-injection
+  - id: cloudflare-workers.tainted-code-injection
     languages:
       - javascript
       - typescript
-    message: Dynamic code execution is an injection sink in a Cloudflare Worker.
+    mode: taint
+    message: Untrusted request data reaches dynamic code execution in a Cloudflare Worker.
     severity: ERROR
     metadata:
       category: security
@@ -12,6 +13,49 @@ rules:
         - "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
       technology:
         - cloudflare-workers
-    pattern-either:
-      - pattern: eval(...)
-      - pattern: new Function(...)
+    pattern-sources: &cloudflare_request_sources
+      - pattern: $URL.searchParams.get(...)
+      - pattern: await $REQUEST.json()
+      - pattern: await $REQUEST.text()
+      - pattern: $FORM.get(...)
+    pattern-sinks:
+      - pattern: eval($CODE)
+      - pattern: new Function($CODE)
+
+  - id: cloudflare-workers.tainted-d1-sql-injection
+    languages:
+      - javascript
+      - typescript
+    mode: taint
+    message: Untrusted request data reaches a Cloudflare D1 SQL query.
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      technology:
+        - cloudflare-workers
+        - cloudflare-d1
+    pattern-sources: *cloudflare_request_sources
+    pattern-sinks:
+      - pattern: $DB.prepare($QUERY)
+
+  - id: cloudflare-workers.tainted-command-injection
+    languages:
+      - javascript
+      - typescript
+    mode: taint
+    message: Untrusted request data reaches an operating-system command execution function.
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe:
+        - "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      technology:
+        - javascript
+    pattern-sources: *cloudflare_request_sources
+    pattern-sinks:
+      - pattern: $CHILD_PROCESS.exec($COMMAND, ...)
+      - pattern: exec($COMMAND, ...)

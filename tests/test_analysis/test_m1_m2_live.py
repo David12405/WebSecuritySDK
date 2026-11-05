@@ -66,11 +66,21 @@ TARGETS_ROOT = PROJECT_ROOT / "test-targets" / "cloudflare" / "targets"
 DEFAULT_RULESET = (
     PROJECT_ROOT / "tests" / "test_analysis" / "rules" / "cloudflare-workers-injection.yml"
 )
+RULESET_FIXTURE_ROOT = (
+    PROJECT_ROOT / "tests" / "test_analysis" / "sample_sources" / "cloudflare_injection"
+)
 REPORT_PATH = PROJECT_ROOT / ".pytest_cache" / "reports" / "m1_m2_integration.json"
 SOURCE_SUFFIXES = frozenset({".cjs", ".js", ".jsx", ".mjs", ".ts", ".tsx"})
 IGNORED_SOURCE_PARTS = frozenset({".git", ".wrangler", "build", "dist", "node_modules"})
 OPENAPI_PATHS = ("/openapi.json", "/openapi.yaml", "/swagger.json", "/v3/api-docs")
 SENSITIVE_KEYS = ("authorization", "cookie", "password", "secret", "token", "api_key")
+EXPECTED_RULE_IDS = frozenset(
+    {
+        "cloudflare-workers.tainted-code-injection",
+        "cloudflare-workers.tainted-d1-sql-injection",
+        "cloudflare-workers.tainted-command-injection",
+    }
+)
 
 # Prevent pytest from treating the imported enum as a test class.
 TestingMode.__test__ = False
@@ -408,11 +418,25 @@ def _trust_policy(ruleset_digest: str) -> CorrelationTrustPolicy:
                 review_ref="LOCAL-INTEGRATION-RULESET-001",
                 rules=(
                     ApprovedRuleSpec(
-                        rule_id="cloudflare-workers.unsafe-eval-injection",
-                        mode=RuleMode.SEARCH,
+                        rule_id="cloudflare-workers.tainted-code-injection",
+                        mode=RuleMode.TAINT,
                         sink_kind=SinkKind.CODE_EVAL,
                         subtype=InjectionSubtype.CODE_INJECTION,
                         cwe_ids=frozenset({"CWE-95"}),
+                    ),
+                    ApprovedRuleSpec(
+                        rule_id="cloudflare-workers.tainted-d1-sql-injection",
+                        mode=RuleMode.TAINT,
+                        sink_kind=SinkKind.SQL_QUERY,
+                        subtype=InjectionSubtype.SQL_INJECTION,
+                        cwe_ids=frozenset({"CWE-89"}),
+                    ),
+                    ApprovedRuleSpec(
+                        rule_id="cloudflare-workers.tainted-command-injection",
+                        mode=RuleMode.TAINT,
+                        sink_kind=SinkKind.OS_COMMAND,
+                        subtype=InjectionSubtype.OS_COMMAND_INJECTION,
+                        cwe_ids=frozenset({"CWE-78"}),
                     ),
                 ),
             ),
@@ -437,6 +461,39 @@ def _redact(value: Any) -> Any:
     return value
 
 
+async def _verify_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
+    """Run a positive control so an empty live scan cannot mask broken rules."""
+    trace.add("ruleset", "semgrep_positive_control", "started")
+    envelope = await LocalSemgrepAdapter(ruleset_path=ruleset).analyze(
+        str(RULESET_FIXTURE_ROOT.resolve())
+    )
+    data = envelope.get("data")
+    assert isinstance(data, dict), "Semgrep positive control returned malformed data"
+    findings = data.get("findings")
+    assert isinstance(findings, list), "Semgrep positive control omitted findings"
+    detected_rule_ids = {
+        finding.get("rule_id")
+        for finding in findings
+        if isinstance(finding, dict) and isinstance(finding.get("rule_id"), str)
+    }
+    missing = sorted(EXPECTED_RULE_IDS - detected_rule_ids)
+    assert not missing, f"Semgrep rules failed their positive control: {missing}"
+    errors = data.get("errors")
+    assert isinstance(errors, list) and not errors, (
+        f"Semgrep positive control reported errors: {errors!r}"
+    )
+    result = {
+        "status": data.get("status"),
+        "semgrep_version": data.get("version"),
+        "files_scanned": data.get("files_scanned"),
+        "finding_count": len(findings),
+        "detected_rule_ids": sorted(detected_rule_ids),
+        "fixture_root": str(RULESET_FIXTURE_ROOT.resolve()),
+    }
+    trace.add("ruleset", "semgrep_positive_control", "completed", **result)
+    return result
+
+
 async def _run_integration(ruleset: Path) -> tuple[dict[str, Any], list[str], int]:
     trace = Trace()
     revision = _git_revision()
@@ -452,6 +509,8 @@ async def _run_integration(ruleset: Path) -> tuple[dict[str, Any], list[str], in
     }
     failures: list[str] = []
     completed_targets = 0
+
+    report["ruleset"]["positive_control"] = await _verify_ruleset(ruleset, trace)
 
     for case in TARGET_CASES:
         target_report: dict[str, Any] = {
