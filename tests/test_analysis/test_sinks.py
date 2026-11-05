@@ -513,6 +513,66 @@ def test_verified_static_taint_flow_extraction_and_metadata():
     assert meta.taint_source_line == 10
 
 
+def test_verified_static_taint_flow_extraction_with_semgrep_cli_atd_format():
+    req = make_shop_analysis_request_with_scope()
+    trace = {
+        "intermediate_vars": [
+            [
+                "CliLoc",
+                [
+                    {
+                        "path": "app/routes.py",
+                        "start": {"line": 12, "col": 5},
+                        "end": {"line": 12, "col": 20},
+                    },
+                    "clean_sort = sort",
+                ],
+            ]
+        ],
+        "taint_source": [
+            "CliLoc",
+            [
+                {
+                    "path": "app/routes.py",
+                    "start": {"line": 10, "col": 5},
+                    "end": {"line": 10, "col": 30},
+                },
+                "request.args.get('sort')",
+            ],
+        ],
+        "taint_sink": [
+            "CliLoc",
+            [
+                {
+                    "path": "app/routes.py",
+                    "start": {"line": 15, "col": 5},
+                    "end": {"line": 15, "col": 40},
+                },
+                "cursor.execute(clean_sort)",
+            ],
+        ],
+    }
+    envelope = make_semgrep_envelope(
+        [
+            make_semgrep_finding(
+                file="app/routes.py",
+                start_line=15,
+                confidence="HIGH",
+                dataflow_trace=trace,
+            )
+        ]
+    )
+    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    assert len(res.sink_candidates) == 1
+    sc = res.sink_candidates[0]
+    assert sc.has_static_taint_flow is True
+    assert len(sc.dataflow_steps) == 3
+    assert sc.confidence == ConfidenceLevel.HIGH
+    meta = res.sink_metadata[sc.sink_id]
+    assert "request.args.get('sort')" in (meta.taint_source_snippet or "")
+    assert meta.taint_source_line == 10
+
+
 # 12. test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_metadata
 def test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_metadata():
     req = make_shop_analysis_request_with_scope()

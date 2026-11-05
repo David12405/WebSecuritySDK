@@ -29,6 +29,7 @@ from websecuritycheck.analysis.semgrep_adapter import (
     validate_offline_ruleset_path,
     validate_source_analysis_scope,
 )
+from websecuritycheck.analysis.sinks import extract_sink_candidates
 from websecuritycheck.domain import TestingMode
 
 SEMGREP_REQUIRED = pytest.mark.skipif(
@@ -140,6 +141,16 @@ def test_primary_ruleset_positive_and_negative_controls() -> None:
     assert all(item.get("dataflow_trace") for item in positive_data["findings"])
     assert positive_data["ruleset_sha256"] == compute_ruleset_sha256(ruleset)
     assert positive_data["execution_ref"].startswith("EXEC-")
+
+    request = make_shop_analysis_request_with_scope(
+        source_repo_path=str(RULESET_FIXTURE_ROOT.resolve()),
+        source_repository_ref=str(RULESET_FIXTURE_ROOT.resolve()),
+        testing_mode=TestingMode.WHITEBOX,
+    )
+    sink_extraction = extract_sink_candidates(request, semgrep_payload=positive)
+    assert len(sink_extraction.sink_candidates) == 3
+    assert all(sc.has_static_taint_flow for sc in sink_extraction.sink_candidates)
+    assert all(bool(sc.dataflow_steps) for sc in sink_extraction.sink_candidates)
 
     negative_data = negative["data"]
     assert negative_data["files_scanned"] == 1

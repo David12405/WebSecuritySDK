@@ -482,14 +482,37 @@ def _parse_trace_node(
     node: Any, default_file: str
 ) -> tuple[str, int, int | None, int | None, str] | None:
     """Extract (file_path, start_line, start_col, end_col, content) from trace node."""
+    if node is None:
+        return None
+
+    if isinstance(node, (list, tuple)):
+        if len(node) == 2 and isinstance(node[0], str):
+            tag, payload = node[0], node[1]
+            if tag == "CliLoc":
+                return _parse_trace_node(payload, default_file)
+            if tag == "CliCall":
+                if isinstance(payload, (list, tuple)) and len(payload) >= 1:
+                    return _parse_trace_node(payload[0], default_file)
+                return _parse_trace_node(payload, default_file)
+        if len(node) >= 2 and (isinstance(node[0], dict) or isinstance(node[1], dict)):
+            loc_part = node[0] if isinstance(node[0], dict) else node[1]
+            content_part = (
+                node[1]
+                if isinstance(node[1], str)
+                else (node[0] if isinstance(node[0], str) else "")
+            )
+            return _parse_trace_node({"location": loc_part, "content": content_part}, default_file)
+        if len(node) == 1:
+            return _parse_trace_node(node[0], default_file)
+
     if isinstance(node, dict):
         loc = node.get("location") or node
         path = loc.get("path") if isinstance(loc.get("path"), str) else default_file
         start = loc.get("start") if isinstance(loc.get("start"), dict) else {}
         end = loc.get("end") if isinstance(loc.get("end"), dict) else {}
-        s_line = start.get("line") if isinstance(start.get("line"), int) else None
-        s_col = start.get("col") if isinstance(start.get("col"), int) else None
-        e_col = end.get("col") if isinstance(end.get("col"), int) else None
+        s_line = start.get("line") if isinstance(start.get("line"), int) else loc.get("line")
+        s_col = start.get("col") if isinstance(start.get("col"), int) else loc.get("col")
+        e_col = end.get("col") if isinstance(end.get("col"), int) else loc.get("end_col")
         content = (
             str(node.get("content"))
             if node.get("content") is not None
@@ -499,14 +522,24 @@ def _parse_trace_node(
                 else ""
             )
         )
-        if s_line is not None and s_line > 0:
+        if isinstance(s_line, int) and s_line > 0:
             return normalize_sink_file_path(path), s_line, s_col, e_col, content
-    elif isinstance(node, (list, tuple)) and len(node) >= 2:
-        loc_part = node[0] if isinstance(node[0], dict) else node[1]
-        content_part = node[1] if isinstance(node[1], str) else ""
-        if isinstance(loc_part, dict):
-            return _parse_trace_node({"location": loc_part, "content": content_part}, default_file)
     return None
+
+
+def _flatten_trace_nodes(raw: Any) -> list[Any]:
+    if not raw:
+        return []
+    if (
+        isinstance(raw, (list, tuple))
+        and len(raw) == 2
+        and isinstance(raw[0], str)
+        and raw[0] in {"CliLoc", "CliCall"}
+    ):
+        return [raw]
+    if isinstance(raw, list):
+        return raw
+    return [raw]
 
 
 def _extract_dataflow_info(
@@ -524,23 +557,19 @@ def _extract_dataflow_info(
     if not isinstance(dataflow_trace, dict):
         return False, [], None, None, None, None, False
 
-    source_nodes = dataflow_trace.get("taint_source")
-    inter_nodes = dataflow_trace.get("intermediate_vars") or []
-    sink_nodes = dataflow_trace.get("taint_sink")
+    source_nodes = _flatten_trace_nodes(dataflow_trace.get("taint_source"))
+    inter_raw = dataflow_trace.get("intermediate_vars") or []
+    inter_nodes = (
+        [inter_raw]
+        if isinstance(inter_raw, (list, tuple))
+        and len(inter_raw) == 2
+        and isinstance(inter_raw[0], str)
+        and inter_raw[0] in {"CliLoc", "CliCall"}
+        else (inter_raw if isinstance(inter_raw, list) else [inter_raw])
+    )
+    sink_nodes = _flatten_trace_nodes(dataflow_trace.get("taint_sink"))
 
-    if isinstance(source_nodes, dict):
-        source_nodes = [source_nodes]
-    if isinstance(inter_nodes, dict):
-        inter_nodes = [inter_nodes]
-    if isinstance(sink_nodes, dict):
-        sink_nodes = [sink_nodes]
-
-    if (
-        not isinstance(source_nodes, list)
-        or not isinstance(sink_nodes, list)
-        or not source_nodes
-        or not sink_nodes
-    ):
+    if not source_nodes or not sink_nodes:
         return False, [], None, None, None, None, False
 
     source_parsed = _parse_trace_node(source_nodes[0], file_path)

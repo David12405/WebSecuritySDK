@@ -29,7 +29,7 @@ GLOBAL_TIMEOUT = 120.0
 MAX_JSON_BYTES = 10 * 1024 * 1024
 MAX_STDERR_BYTES = 64 * 1024
 MAX_FINDINGS = 500
-MAX_OPTIONAL_DEPTH = 6
+MAX_OPTIONAL_DEPTH = 12
 MAX_OPTIONAL_ENTRIES = 50
 MAX_OPTIONAL_STRING = 2_048
 SENSITIVE_SCAN_EXCLUDES = (
@@ -139,6 +139,40 @@ def _safe_diagnostic(
                 capped.pop("path", None)
         return capped
     return capped
+
+
+def _normalize_trace(
+    value: Any, execution_root: Path, approved_root: Path, scan_path: Path, depth: int = 0
+) -> Any:
+    if depth >= MAX_OPTIONAL_DEPTH:
+        return None
+    if isinstance(value, str):
+        return value[:MAX_OPTIONAL_STRING]
+    if isinstance(value, list):
+        return [
+            _normalize_trace(item, execution_root, approved_root, scan_path, depth + 1)
+            for item in value[:MAX_OPTIONAL_ENTRIES]
+        ]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in list(value.items())[:MAX_OPTIONAL_ENTRIES]:
+            if str(k) == "path" and isinstance(v, str):
+                try:
+                    resolved = _resolve_reported_path(execution_root, v)
+                    if _is_within(resolved, scan_path) and is_analyzer_safe(resolved):
+                        out["path"] = relative_path(approved_root, resolved)
+                    else:
+                        out["path"] = v[:MAX_OPTIONAL_STRING]
+                except ToolError:
+                    out["path"] = v[:MAX_OPTIONAL_STRING]
+            else:
+                out[str(k)[:MAX_OPTIONAL_STRING]] = _normalize_trace(
+                    v, execution_root, approved_root, scan_path, depth + 1
+                )
+        return out
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return None
 
 
 def _location(value: Any) -> tuple[int, int | None]:
@@ -251,7 +285,7 @@ def _normalize(
                 if isinstance(extra.get("metadata"), dict) else None
             ),
             metavariables=_cap(metavars) if metavars is not None else None,
-            dataflow_trace=_cap(trace) if trace is not None else None,
+            dataflow_trace=_normalize_trace(trace, execution_root, approved_root, scan_path) if trace is not None else None,
         ))
     version = raw.get("version") if isinstance(raw.get("version"), str) else None
     result = SemgrepAnalysisResult(
@@ -334,7 +368,7 @@ async def analyze_source(
             executable, "scan", f"--json-output={output_path}",
             f"--config={configured_ruleset}", "--oss-only", "--metrics=off",
             "--disable-version-check", "--no-autofix", "--no-git-ignore",
-            "--no-rewrite-rule-ids", "--max-target-bytes=1000000",
+            "--no-rewrite-rule-ids", "--dataflow-traces", "--max-target-bytes=1000000",
             "--max-lines-per-finding=10", "--max-chars-per-line=200", "--timeout=5",
             "--timeout-threshold=3", "--jobs=1",
         ]

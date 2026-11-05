@@ -90,6 +90,7 @@ def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
     async def fake_runner(argv, cwd, output_path, stderr_path):
         assert "--no-git-ignore" in argv
         assert "--no-rewrite-rule-ids" in argv
+        assert "--dataflow-traces" in argv
         assert "--exclude=.env*" in argv
         assert "--exclude=*.pem" in argv
         assert "--exclude=credentials.json" in argv
