@@ -283,6 +283,38 @@ def test_ambiguous_mapping_rejected():
     assert accessor_trunc.resolution == AccessorResolution.TRUNCATED
 
 
+def test_cloudflare_fetch_api_accessors():
+    """Cloudflare Workers / Fetch API accessors are resolved or classified dynamic accurately."""
+    # 1. searchParams.get('q')
+    acc_query = parse_taint_source_accessor("url.searchParams.get('q')")
+    assert acc_query.resolution == AccessorResolution.RESOLVED
+    assert acc_query.parameter_name == "q"
+    assert InputLocation.QUERY in acc_query.locations
+
+    # 2. formData.get('comment')
+    acc_form = parse_taint_source_accessor("formData.get('comment')")
+    assert acc_form.resolution == AccessorResolution.RESOLVED
+    assert acc_form.parameter_name == "comment"
+    assert InputLocation.FORM in acc_form.locations
+
+    # 3. request.headers.get('X-Test-Client')
+    acc_header = parse_taint_source_accessor("request.headers.get('X-Test-Client')")
+    assert acc_header.resolution == AccessorResolution.RESOLVED
+    assert acc_header.parameter_name == "X-Test-Client"
+    assert InputLocation.HEADER in acc_header.locations
+
+    # 4. body.keyword (JSON body)
+    acc_body = parse_taint_source_accessor("body.keyword")
+    assert acc_body.resolution == AccessorResolution.RESOLVED
+    assert acc_body.parameter_name == "keyword"
+    assert InputLocation.JSON_BODY in acc_body.locations
+
+    # 5. Dynamic expressions
+    assert parse_taint_source_accessor("await request.json()").resolution == AccessorResolution.DYNAMIC_KEY
+    assert parse_taint_source_accessor("url.searchParams.get(dynKey)").resolution == AccessorResolution.DYNAMIC_KEY
+    assert parse_taint_source_accessor("formData.get(dynKey)").resolution == AccessorResolution.DYNAMIC_KEY
+
+
 def test_name_similarity_alone_not_correlated():
     """A parameter named 'sort' is not paired with a sink where taint is in another file."""
     accessor = parse_taint_source_accessor("request.args.get('sort')")

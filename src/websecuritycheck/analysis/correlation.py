@@ -815,6 +815,27 @@ _EXPRESS_PROP_RE = re.compile(
     r"""req\.(query|params|cookies|headers|body)(?:\.([A-Za-z0-9_]+)|\[\s*['"]([A-Za-z0-9_-]+)['"]\s*\])"""
 )
 _EXPRESS_GET_RE = re.compile(r"""req\.get\(\s*['"]([A-Za-z0-9_-]+)['"]\s*\)""")
+_FETCH_SEARCH_PARAMS_RE = re.compile(
+    r"""(?:\b[A-Za-z_$][\w$]*\.)?searchParams\.get\(\s*['"]([A-Za-z0-9_-]+)['"]\s*\)"""
+)
+_FETCH_FORM_DATA_RE = re.compile(
+    r"""\b(?:formData|form)\.get\(\s*['"]([A-Za-z0-9_-]+)['"]\s*\)"""
+)
+_FETCH_HEADERS_RE = re.compile(
+    r"""(?:\b(?:request|req)\.)?headers\.get\(\s*['"]([A-Za-z0-9_-]+)['"]\s*\)"""
+)
+_JS_BODY_PROP_RE = re.compile(
+    r"""\b(?:body|data|payload)(?:\.([A-Za-z0-9_]+)|\[\s*['"]([A-Za-z0-9_-]+)['"]\s*\])"""
+)
+_DYNAMIC_ACCESSOR_RE = re.compile(
+    r"""(?x)
+    request\.(?:args|form|values)\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\]
+    | (?:\b[A-Za-z_$][\w$]*\.)?searchParams\.get\(\s*[A-Za-z_$][\w$]*\s*\)
+    | \b(?:formData|form)\.get\(\s*[A-Za-z_$][\w$]*\s*\)
+    | (?:\b(?:request|req)\.)?headers\.get\(\s*[A-Za-z_$][\w$]*\s*\)
+    | \b(?:await\s+)?(?:request|req)\.(?:json|text|formData)\(\)
+"""
+)
 
 
 def parse_taint_source_accessor(snippet: str | None) -> TaintSourceAccessor:
@@ -917,8 +938,46 @@ def parse_taint_source_accessor(snippet: str | None) -> TaintSourceAccessor:
             pattern_id="express_req_get",
         )
 
-    # Check dynamic key attempts: e.g. request.args[var] or request.args.get(x)
-    if re.search(r"""request\.(?:args|form|values)\[\s*[A-Za-z_][A-Za-z0-9_]*\s*\]""", clean_snip):
+    # 4. Fetch API / Cloudflare Workers matchers
+    m = _FETCH_SEARCH_PARAMS_RE.search(clean_snip)
+    if m:
+        return TaintSourceAccessor(
+            resolution=AccessorResolution.RESOLVED,
+            locations=frozenset({InputLocation.QUERY}),
+            parameter_name=m.group(1),
+            pattern_id="fetch_search_params_get",
+        )
+
+    m = _FETCH_FORM_DATA_RE.search(clean_snip)
+    if m:
+        return TaintSourceAccessor(
+            resolution=AccessorResolution.RESOLVED,
+            locations=frozenset({InputLocation.FORM}),
+            parameter_name=m.group(1),
+            pattern_id="fetch_form_data_get",
+        )
+
+    m = _FETCH_HEADERS_RE.search(clean_snip)
+    if m:
+        return TaintSourceAccessor(
+            resolution=AccessorResolution.RESOLVED,
+            locations=frozenset({InputLocation.HEADER}),
+            parameter_name=m.group(1),
+            pattern_id="fetch_headers_get",
+        )
+
+    m = _JS_BODY_PROP_RE.search(clean_snip)
+    if m:
+        param = m.group(1) or m.group(2)
+        return TaintSourceAccessor(
+            resolution=AccessorResolution.RESOLVED,
+            locations=frozenset({InputLocation.JSON_BODY}),
+            parameter_name=param,
+            pattern_id="js_body_property",
+        )
+
+    # Check dynamic key attempts: e.g. request.args[var], searchParams.get(var), or await request.json()
+    if _DYNAMIC_ACCESSOR_RE.search(clean_snip):
         return TaintSourceAccessor(resolution=AccessorResolution.DYNAMIC_KEY)
 
     return TaintSourceAccessor(resolution=AccessorResolution.UNSUPPORTED)

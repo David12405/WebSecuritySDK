@@ -90,6 +90,7 @@ class TargetCase:
     source_root: Path
     assessment_id: str
     specialized_tool: str
+    expected_rule_ids: frozenset[str] = frozenset()
 
 
 TARGET_CASES = (
@@ -99,6 +100,12 @@ TARGET_CASES = (
         TARGETS_ROOT / "basic",
         "ASM-101",
         "crawl_web",
+        frozenset(
+            {
+                "cloudflare-workers.tainted-code-injection",
+                "cloudflare-workers.tainted-command-injection",
+            }
+        ),
     ),
     TargetCase(
         "spa",
@@ -106,6 +113,7 @@ TARGET_CASES = (
         TARGETS_ROOT / "spa",
         "ASM-102",
         "explore_browser",
+        frozenset({"cloudflare-workers.tainted-d1-sql-injection"}),
     ),
     TargetCase(
         "api",
@@ -113,6 +121,7 @@ TARGET_CASES = (
         TARGETS_ROOT / "api",
         "ASM-103",
         "parse_api_spec",
+        frozenset({"cloudflare-workers.tainted-d1-sql-injection"}),
     ),
 )
 
@@ -758,6 +767,20 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
     assert "SEMGREP_SCAN_EMPTY" not in sink_result.limitations
     missing_scanned = sorted(set(expected_files) - set(sink_result.scanned_files))
     assert not missing_scanned, f"Semgrep omitted approved source files: {missing_scanned}"
+
+    detected_rule_ids = {
+        sink.rule_id
+        for sink in sink_result.sink_candidates
+        if isinstance(sink.rule_id, str)
+    }
+    target_report["detected_rule_ids"] = sorted(detected_rule_ids)
+    target_report["finding_count"] = len(sink_result.sink_candidates)
+    if case.expected_rule_ids:
+        missing_rules = sorted(case.expected_rule_ids - detected_rule_ids)
+        assert not missing_rules, (
+            f"Target {case.name} missing expected Semgrep sink rules: {missing_rules}, "
+            f"detected: {sorted(detected_rule_ids)}"
+        )
 
     policy = trust_policy(compute_ruleset_sha256(ruleset))
     correlation = correlate_evidence(
