@@ -825,7 +825,7 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
         {
             *input_result.warnings,
             *sink_result.warnings,
-            *cve_result.warnings,
+            *getattr(cve_result, "warnings", ()),
             *route_result.warnings,
             *correlation.warnings,
         }
