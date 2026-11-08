@@ -9,6 +9,7 @@ schema "websecuritycheck.route_binding_artifact.v1" using real AST parsers:
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 import hashlib
 import json
 import re
@@ -86,16 +87,17 @@ REVIEWED_STATIC_ROUTE_PRODUCER = TrustedRouteProducer(
 # ---------------------------------------------------------------------------
 
 
-class ExtractedRawRoute(StrictModel):
+@dataclass(frozen=True, slots=True)
+class ExtractedRawRoute:
     """Raw route handler candidate extracted directly from an AST."""
 
     path_template: str
-    methods: tuple[str, ...] = ()
     file_path: str
     start_line: int
     end_line: int
     extraction_method: str
     extraction_method_digest: str
+    methods: tuple[str, ...] = ()
 
 
 class RouteBindingExtractionResult(StrictModel):
@@ -267,8 +269,8 @@ def _extract_js_ts_routes(
                     warnings.append(f"UNSUPPORTED_DYNAMIC_ROUTE_REGEX:{raw_regex}")
 
         if path_literal:
-            start_l = node.start_point.row + 1
-            end_l = node.end_point.row + 1
+            start_l = int(node.start_point.row + 1)
+            end_l = int(node.end_point.row + 1)
 
             # Detect method guards in consequence statements
             c_stack = [consequence]
@@ -332,8 +334,8 @@ def _extract_js_ts_routes(
                         p_lit = args.named_children[0].text.decode("utf-8").strip('"\'')
                         if not p_lit.startswith("/"):
                             continue
-                        start_l = node.start_point.row + 1
-                        end_l = node.end_point.row + 1
+                        start_l = int(node.start_point.row + 1)
+                        end_l = int(node.end_point.row + 1)
                         routes.append(
                             ExtractedRawRoute(
                                 path_template=p_lit,
@@ -404,8 +406,8 @@ def _extract_python_routes(
                     methods.add(dec_fn.attr.upper())
 
             if path_str:
-                start_l = item.lineno
-                end_l = getattr(item, "end_lineno", item.lineno)
+                start_l = int(item.lineno)
+                end_l = int(getattr(item, "end_lineno", item.lineno))
                 routes.append(
                     ExtractedRawRoute(
                         path_template=path_str,
