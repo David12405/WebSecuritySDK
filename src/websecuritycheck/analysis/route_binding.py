@@ -158,13 +158,13 @@ def _extract_js_ts_routes(
     if tree.root_node.has_error:
         return [], [], [f"AST_SYNTAX_WARNING:{rel_path_str}"]
 
-    # Collect all AST nodes iteratively to prevent deep recursion issues
+    # Collect all named AST nodes iteratively to prevent deep recursion issues
     stack = [tree.root_node]
     all_nodes = []
     while stack:
         curr = stack.pop()
         all_nodes.append(curr)
-        for child in reversed(curr.children):
+        for child in reversed(curr.named_children):
             stack.append(child)
 
     routes: list[ExtractedRawRoute] = []
@@ -182,7 +182,7 @@ def _extract_js_ts_routes(
                 if fn and args and fn.type == "member_expression":
                     prop = fn.child_by_field_name("property")
                     if prop and prop.text == b"match":
-                        for a in args.children:
+                        for a in args.named_children:
                             if a.type == "regex":
                                 regex_vars[name_node.text.decode("utf-8")] = a.text.decode("utf-8")
 
@@ -273,17 +273,20 @@ def _extract_js_ts_routes(
             end_l = int(node.end_point.row + 1)
 
             # Detect method guards in consequence statements
-            c_stack = [consequence]
-            while c_stack:
-                cn = c_stack.pop()
+            candidate_stmts = (
+                consequence.named_children
+                if consequence.type == "statement_block"
+                else [consequence]
+            )
+            for cn in candidate_stmts:
                 if cn.type == "if_statement":
                     inner_cond = cn.child_by_field_name("condition")
                     while inner_cond and inner_cond.type == "parenthesized_expression":
                         inner_cond = (
-                        inner_cond.named_children[0]
-                        if inner_cond.named_children
-                        else None
-                    )
+                            inner_cond.named_children[0]
+                            if inner_cond.named_children
+                            else None
+                        )
                     if inner_cond and inner_cond.type == "binary_expression":
                         m_left = inner_cond.child_by_field_name("left")
                         m_op = inner_cond.child_by_field_name("operator") or inner_cond.child(1)
@@ -296,8 +299,6 @@ def _extract_js_ts_routes(
                             extracted_methods.add(
                                 m_right.text.decode("utf-8").strip('"\'').upper()
                             )
-                for c in reversed(cn.children):
-                    c_stack.append(c)
 
             routes.append(
                 ExtractedRawRoute(
@@ -328,7 +329,7 @@ def _extract_js_ts_routes(
                         "url", "searchparams", "formdata", "headers",
                         "request", "req", "map", "params", "data",
                     }
-                    if obj_text in ignore_objs:
+                    if any(ig in obj_text for ig in ignore_objs):
                         continue
                     if args.named_children and args.named_children[0].type == "string":
                         p_lit = args.named_children[0].text.decode("utf-8").strip('"\'')
