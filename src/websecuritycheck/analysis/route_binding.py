@@ -167,6 +167,17 @@ def _extract_js_ts_routes(
         for child in reversed(curr.named_children):
             stack.append(child)
 
+    def _node_bytes(n: object) -> bytes:
+        return content_bytes[n.start_byte : n.end_byte]  # type: ignore[attr-defined]
+
+    def _node_lines(n: object) -> tuple[int, int]:
+        sb: int = n.start_byte  # type: ignore[attr-defined]
+        eb: int = n.end_byte  # type: ignore[attr-defined]
+        return (
+            content_bytes.count(b"\n", 0, sb) + 1,
+            content_bytes.count(b"\n", 0, eb) + 1,
+        )
+
     routes: list[ExtractedRawRoute] = []
     warnings: list[str] = []
 
@@ -181,10 +192,10 @@ def _extract_js_ts_routes(
                 args = val_node.child_by_field_name("arguments")
                 if fn and args and fn.type == "member_expression":
                     prop = fn.child_by_field_name("property")
-                    if prop and prop.text == b"match":
+                    if prop and _node_bytes(prop) == b"match":
                         for a in args.named_children:
                             if a.type == "regex":
-                                regex_vars[name_node.text.decode("utf-8")] = a.text.decode("utf-8")
+                                regex_vars[_node_bytes(name_node).decode("utf-8")] = _node_bytes(a).decode("utf-8")
 
     # 2. Extract Cloudflare Worker fetch routes
     for node in all_nodes:
@@ -208,7 +219,7 @@ def _extract_js_ts_routes(
         sub_conds = []
         if cond.type == "binary_expression":
             op = cond.child_by_field_name("operator") or cond.child(1)
-            if op and op.text in (b"&&", b"||"):
+            if op and _node_bytes(op) in (b"&&", b"||"):
                 sub_conds = [cond.child_by_field_name("left"), cond.child_by_field_name("right")]
             else:
                 sub_conds = [cond]
@@ -228,34 +239,36 @@ def _extract_js_ts_routes(
                 left = sc.child_by_field_name("left")
                 op = sc.child_by_field_name("operator") or sc.child(1)
                 right = sc.child_by_field_name("right")
-                if op and op.text in (b"===", b"=="):
-                    if left and left.text in (b"path", b"url.pathname", b"pathname"):
+                if op and _node_bytes(op) in (b"===", b"=="):
+                    left_b = _node_bytes(left) if left else b""
+                    right_b = _node_bytes(right) if right else b""
+                    if left and left_b in (b"path", b"url.pathname", b"pathname"):
                         if right and right.type == "string":
-                            path_literal = right.text.decode("utf-8").strip('"\'')
+                            path_literal = right_b.decode("utf-8").strip('"\'')
                     elif (
                         right
-                        and right.text in (b"path", b"url.pathname", b"pathname")
+                        and right_b in (b"path", b"url.pathname", b"pathname")
                         and left
                         and left.type == "string"
                     ):
-                        path_literal = left.text.decode("utf-8").strip('"\'')
+                        path_literal = left_b.decode("utf-8").strip('"\'')
                     elif (
                         left
-                        and left.text in (b"method", b"request.method")
+                        and left_b in (b"method", b"request.method")
                         and right
                         and right.type == "string"
                     ):
-                        extracted_methods.add(right.text.decode("utf-8").strip('"\'').upper())
+                        extracted_methods.add(right_b.decode("utf-8").strip('"\'').upper())
                     elif (
                         right
-                        and right.text in (b"method", b"request.method")
+                        and right_b in (b"method", b"request.method")
                         and left
                         and left.type == "string"
                     ):
-                        extracted_methods.add(left.text.decode("utf-8").strip('"\'').upper())
+                        extracted_methods.add(left_b.decode("utf-8").strip('"\'').upper())
 
         if not path_literal and cond.type == "identifier":
-            var_name = cond.text.decode("utf-8")
+            var_name = _node_bytes(cond).decode("utf-8")
             if var_name in regex_vars:
                 raw_regex = regex_vars[var_name]
                 # Validate anchored regex
@@ -269,8 +282,7 @@ def _extract_js_ts_routes(
                     warnings.append(f"UNSUPPORTED_DYNAMIC_ROUTE_REGEX:{raw_regex}")
 
         if path_literal:
-            start_l = int(node.start_point.row + 1)
-            end_l = int(node.end_point.row + 1)
+            start_l, end_l = _node_lines(node)
 
             # Detect method guards in consequence statements
             candidate_stmts = (
@@ -291,13 +303,13 @@ def _extract_js_ts_routes(
                         m_left = inner_cond.child_by_field_name("left")
                         m_op = inner_cond.child_by_field_name("operator") or inner_cond.child(1)
                         m_right = inner_cond.child_by_field_name("right")
-                        is_method_op = m_op and (
-                            m_op.text in (b"!==", b"!=") or m_op.text in (b"===", b"==")
-                        )
-                        is_method_left = m_left and m_left.text in (b"method", b"request.method")
+                        m_op_b = _node_bytes(m_op) if m_op else b""
+                        m_left_b = _node_bytes(m_left) if m_left else b""
+                        is_method_op = m_op_b in (b"!==", b"!=", b"===", b"==")
+                        is_method_left = m_left_b in (b"method", b"request.method")
                         if is_method_op and is_method_left and m_right and m_right.type == "string":
                             extracted_methods.add(
-                                m_right.text.decode("utf-8").strip('"\'').upper()
+                                _node_bytes(m_right).decode("utf-8").strip('"\'').upper()
                             )
 
             routes.append(
@@ -320,10 +332,11 @@ def _extract_js_ts_routes(
             args = node.child_by_field_name("arguments")
             if fn and args and fn.type == "member_expression":
                 prop = fn.child_by_field_name("property")
-                if prop and prop.text and prop.text.lower() in http_methods:
-                    method_str = prop.text.decode("utf-8").upper()
+                prop_b = _node_bytes(prop).lower() if prop else b""
+                if prop_b in http_methods:
+                    method_str = prop_b.decode("utf-8").upper()
                     obj = fn.child_by_field_name("object")
-                    obj_text = obj.text.decode("utf-8").lower() if obj and obj.text else ""
+                    obj_text = _node_bytes(obj).decode("utf-8").lower() if obj else ""
                     # Ignore common map/params/URL accessors
                     ignore_objs = {
                         "url", "searchparams", "formdata", "headers",
@@ -332,11 +345,10 @@ def _extract_js_ts_routes(
                     if any(ig in obj_text for ig in ignore_objs):
                         continue
                     if args.named_children and args.named_children[0].type == "string":
-                        p_lit = args.named_children[0].text.decode("utf-8").strip('"\'')
+                        p_lit = _node_bytes(args.named_children[0]).decode("utf-8").strip('"\'')
                         if not p_lit.startswith("/"):
                             continue
-                        start_l = int(node.start_point.row + 1)
-                        end_l = int(node.end_point.row + 1)
+                        start_l, end_l = _node_lines(node)
                         routes.append(
                             ExtractedRawRoute(
                                 path_template=p_lit,
