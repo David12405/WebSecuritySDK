@@ -846,11 +846,11 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
         limitations=limitations,
         warnings=warnings,
     )
-    validate_module2_handoff(output, request_with_routes)
+    validate_module2_handoff(output, request)
     envelope = build_correlation_envelope(
         output,
         correlation,
-        request_with_routes,
+        request,
         expected_trust_policy_fingerprint=policy.fingerprint,
     )
     target_report.update(
