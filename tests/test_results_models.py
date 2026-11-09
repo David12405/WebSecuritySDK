@@ -96,6 +96,38 @@ def test_a_cancelled_call_did_not_measure() -> None:
     assert result.status == "failed"
 
 
+def test_an_optional_tools_error_does_not_fail_a_measured_recon_check() -> None:
+    """A recon check that mapped the surface is not `failed` because its
+    crawler was down or a spec guess 404'd - those tools were not required."""
+    result = CheckResult.build(
+        check="surface",
+        target="https://example.com",
+        output=CheckOutput(notes="mapped 6 endpoints"),
+        errors=[
+            ErrorInfo(kind="tool", tool="crawl_web", code="E_TOOL_UNAVAILABLE", message="no ZAP"),
+            ErrorInfo(kind="tool", tool="parse_api_spec", code="E_INVALID_TARGET", message="404"),
+        ],
+        trace=[tool_step(name="probe_http")],  # something DID measure
+        must_call=(),  # surface requires no tool
+    )
+    assert result.status == "passed"
+    # The errors are still reported, just not fatal.
+    assert len(result.errors) == 2
+
+
+def test_a_required_tools_error_still_fails_the_check() -> None:
+    """The optional-tool leniency does not extend to a tool the check needed."""
+    result = CheckResult.build(
+        check="headers",
+        target="https://example.com",
+        output=CheckOutput(),
+        errors=[ErrorInfo(kind="tool", tool="get_response_headers", code="E_HTTP", message="500")],
+        trace=[tool_step(name="get_tls_info")],  # a different tool measured
+        must_call=("get_response_headers",),
+    )
+    assert result.status == "failed"
+
+
 # --------------------------------------------------------------------------
 # What the model is not allowed to say
 # --------------------------------------------------------------------------
