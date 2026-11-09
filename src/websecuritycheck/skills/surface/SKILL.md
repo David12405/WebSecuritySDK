@@ -84,14 +84,16 @@ mark against the run. Call a tool only when its precondition below is met.
 4. **Browser, if needed.** If step 2 found a near-empty page and the response
    was an HTML shell with scripts, call `explore_browser` on the target. Its
    `network_events` name the endpoints the page fetches at runtime.
-5. **Spec, only if you found one.** `parse_api_spec` reads an OpenAPI or
-   Swagger document, nothing else. Call it **only** on a URL that is one: the
-   path ends in `.json`/`.yaml` or contains `openapi`/`swagger`/`api-docs`,
-   **and** step 1–3 saw it served as JSON. A `.js` script, a `.css`
-   stylesheet, the HTML page, an image — none of these is a spec; parsing one
-   returns `E_PARSE` and buys nothing but an error on the run. If you found no
-   spec, skip this step entirely and say so in `notes`. The bundled
-   JavaScript of a single-page app is not an API spec.
+5. **Spec, only if you already saw one.** `parse_api_spec` reads an OpenAPI or
+   Swagger document, nothing else. Call it **only** on a URL that steps 1–4
+   actually surfaced *and* that is a spec: the path ends in `.json`/`.yaml` or
+   contains `openapi`/`swagger`/`api-docs`, served as JSON. **Do not guess
+   spec paths.** If crawl and the browser did not reveal a spec URL, there is
+   no spec — skip this step, say so in `notes`, and do not call the tool at
+   all. And if one call returns a 404 or "no OpenAPI document", that path has
+   no spec: **stop** — do not try another path. Each failed call is an error
+   on the run, and probing a list of guessed paths turns one "no spec" into a
+   dozen. The bundled JavaScript of a single-page app is not an API spec.
 
 ## What is a finding
 
