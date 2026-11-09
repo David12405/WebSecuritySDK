@@ -85,14 +85,15 @@ class SecurityChecker:
         """Which origins may read the response, and whether credentials go with them."""
         return self.run("cors", target)
 
-    def check_fingerprint(self, target: str) -> CheckResult:
-        """Published versions and components that should not be reachable.
+    def check_surface(self, target: str) -> CheckResult:
+        """Map the reachable surface: technologies and endpoints, then exposures.
 
-        Needs the WhatWeb binary. Without it the check comes back `failed`
-        with `E_TOOL_UNAVAILABLE` - a fact about the machine, not the
-        target. See `scripts/README.md`.
+        The multi-step recon check - WhatWeb, crawl, probe, browser, API spec.
+        Parked, so `check_all` leaves it out; run it by name. Tools degrade
+        independently: a missing WhatWeb or ZAP is `E_TOOL_UNAVAILABLE` in
+        `notes`, not a failed check.
         """
-        return self.run("fingerprint", target)
+        return self.run("surface", target)
 
     def check_all(self, target: str) -> list[CheckResult]:
         """What a scan of a site means today, merged into one list of results.

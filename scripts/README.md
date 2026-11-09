@@ -30,7 +30,7 @@ WEBSEC_WHATWEB_PATH=D:\path\to\WebSecuritySDK\scripts\whatweb.cmd
 and both of these run with nothing set in the shell:
 
 ```powershell
-python examples/run_check.py https://example.com --check fingerprint
+python examples/run_check.py https://example.com --check surface
 python examples/probe_target.py https://example.com --tool fingerprint_web
 ```
 
