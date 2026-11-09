@@ -27,8 +27,8 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from mcp_servers.websec_tools import probes  # noqa: E402
+from mcp_servers.websec_tools import recon as recon_tools  # noqa: E402
 from mcp_servers.websec_tools.errors import ToolError, safe_message  # noqa: E402
-from mcp_servers.websec_tools.recon import nmap, openapi, whatweb, zap  # noqa: E402
 
 TOOL_ORDER = (
     "discover_hosts",
@@ -69,7 +69,7 @@ def _classify_target(target: str) -> str:
             raise ValueError(exc.message) from exc
         return "url"
     try:
-        nmap._validate_target(target)
+        recon_tools.nmap._validate_target(target)
     except ToolError as exc:
         raise ValueError(exc.message) from exc
     return "network"
@@ -232,16 +232,16 @@ async def _call_one(
 
 def _tool_calls() -> dict[str, ToolCall]:
     return {
-        "discover_hosts": nmap.discover_hosts,
-        "discover_services": nmap.discover_services,
+        "discover_hosts": recon_tools.nmap.discover_hosts,
+        "discover_services": recon_tools.nmap.discover_services,
         "get_response_headers": probes.get_response_headers,
         "get_cookies": probes.get_cookies,
         "get_tls_info": probes.get_tls_info,
         "get_cors_policy": probes.get_cors_policy,
-        "fingerprint_web": whatweb.fingerprint_web,
-        "crawl_web": zap.crawl_web,
-        "passive_web_analysis": zap.passive_web_analysis,
-        "parse_api_spec": openapi.parse_api_spec,
+        "fingerprint_web": recon_tools.whatweb.fingerprint_web,
+        "crawl_web": recon_tools.zap.crawl_web,
+        "passive_web_analysis": recon_tools.zap.passive_web_analysis,
+        "parse_api_spec": recon_tools.openapi.parse_api_spec,
     }
 
 

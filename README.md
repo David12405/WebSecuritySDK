@@ -83,6 +83,30 @@ python examples/inspect_hooks.py
 pytest
 ```
 
+## Module 2 source analysis
+
+The MCP server exposes `inspect_source_tree`, `read_source_file`,
+`search_source`, and `analyze_source`. The first three are bounded,
+repository-confined source tools. `analyze_source` invokes an externally
+installed Semgrep binary using trusted server-side configuration:
+
+```bash
+export WEBSEC_SEMGREP_PATH=semgrep
+export WEBSEC_SEMGREP_RULESET=p/default
+python -m mcp_servers.websec_tools.server
+```
+
+Install Semgrep separately; the Python package does not bundle or download it.
+The ruleset and executable are not caller-controlled MCP arguments, and
+Semgrep output is analyzer observation rather than a vulnerability verdict.
+
+For a direct local-fixture smoke test, use the included runner:
+
+```bash
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool inspect_source_tree
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool search_source --query eval
+python examples/analyze_source.py ~/Intern/test/fixtures/vulnerable_app --tool analyze_source
+```
 `examples/run_check.py` — one full agent run — is not written yet.
 
 ---

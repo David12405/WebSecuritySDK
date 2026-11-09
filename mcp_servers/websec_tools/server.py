@@ -5,8 +5,21 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from . import analysis as analysis_tools
 from . import probes
-from . import recon as recon_tools
+
+try:
+    from . import recon as recon_tools
+except ImportError:  # Compatibility while the recon package is not merged.
+    from . import nmap, openapi, whatweb, zap
+
+    class _FlatReconTools:
+        nmap = nmap
+        openapi = openapi
+        whatweb = whatweb
+        zap = zap
+
+    recon_tools = _FlatReconTools()
 from .errors import ToolError
 
 ToolCallable = Callable[..., Awaitable[dict[str, Any]]]
@@ -134,6 +147,46 @@ async def parse_api_spec(target: str) -> dict[str, Any]:
     return await _invoke(recon_tools.openapi.parse_api_spec, target)
 
 
+async def inspect_source_tree(
+    target: str, path: str = ".", max_depth: int = 4
+) -> dict[str, Any]:
+    """Return deterministic repository structure facts."""
+
+    return await _invoke(analysis_tools.source.inspect_source_tree, target, path, max_depth)
+
+
+async def read_source_file(
+    target: str,
+    path: str,
+    start_line: int = 1,
+    end_line: int | None = None,
+) -> dict[str, Any]:
+    """Return a bounded range from an authorized source file."""
+
+    return await _invoke(
+        analysis_tools.source.read_source_file, target, path, start_line, end_line
+    )
+
+
+async def search_source(
+    target: str,
+    query: str,
+    path: str = ".",
+    case_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Search repository source using bounded literal matching."""
+
+    return await _invoke(
+        analysis_tools.source.search_source, target, query, path, case_sensitive
+    )
+
+
+async def analyze_source(target: str, path: str = ".") -> dict[str, Any]:
+    """Run the server-configured Semgrep ruleset over repository source."""
+
+    return await _invoke(analysis_tools.semgrep.analyze_source, target, path)
+
+
 TOOLS = (
     probe_http,
     get_response_headers,
@@ -148,6 +201,10 @@ TOOLS = (
     passive_web_analysis,
     fingerprint_web,
     parse_api_spec,
+    inspect_source_tree,
+    read_source_file,
+    search_source,
+    analyze_source,
     explore_browser,
 )
 

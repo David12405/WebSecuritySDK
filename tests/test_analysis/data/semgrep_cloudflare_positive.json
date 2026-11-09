@@ -1,0 +1,151 @@
+{
+  "version": "1.183.0",
+  "results": [
+    {
+      "check_id": "cloudflare-workers.tainted-code-injection",
+      "path": "positive/worker.js",
+      "start": {"line": 5, "col": 3, "offset": 0},
+      "end": {"line": 5, "col": 19, "offset": 0},
+      "extra": {
+        "message": "Untrusted request data reaches dynamic code execution in a Cloudflare Worker.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "confidence": "HIGH",
+          "cwe": ["CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"],
+          "technology": ["cloudflare-workers"]
+        },
+        "lines": "  eval(expression);",
+        "dataflow_trace": {
+          "taint_source": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 4, "col": 22, "offset": 0},
+                "end": {"line": 4, "col": 56, "offset": 0}
+              },
+              "url.searchParams.get(\"expression\")"
+            ]
+          ],
+          "intermediate_vars": [
+            {
+              "location": {
+                "path": "positive/worker.js",
+                "start": {"line": 4, "col": 9, "offset": 0},
+                "end": {"line": 4, "col": 19, "offset": 0}
+              },
+              "content": "expression"
+            }
+          ],
+          "taint_sink": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 5, "col": 8, "offset": 0},
+                "end": {"line": 5, "col": 18, "offset": 0}
+              },
+              "expression"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "check_id": "cloudflare-workers.tainted-d1-sql-injection",
+      "path": "positive/worker.js",
+      "start": {"line": 8, "col": 9, "offset": 0},
+      "end": {"line": 8, "col": 39, "offset": 0},
+      "extra": {
+        "message": "Untrusted request data reaches a Cloudflare D1 SQL query.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "confidence": "HIGH",
+          "cwe": ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command"],
+          "technology": ["cloudflare-workers", "cloudflare-d1"]
+        },
+        "lines": "  await env.DB.prepare(body.unsafeSql).all();",
+        "dataflow_trace": {
+          "taint_source": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 7, "col": 16, "offset": 0},
+                "end": {"line": 7, "col": 36, "offset": 0}
+              },
+              "await request.json()"
+            ]
+          ],
+          "intermediate_vars": [
+            {
+              "location": {
+                "path": "positive/worker.js",
+                "start": {"line": 7, "col": 9, "offset": 0},
+                "end": {"line": 7, "col": 13, "offset": 0}
+              },
+              "content": "body"
+            }
+          ],
+          "taint_sink": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 8, "col": 24, "offset": 0},
+                "end": {"line": 8, "col": 38, "offset": 0}
+              },
+              "body.unsafeSql"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "check_id": "cloudflare-workers.tainted-command-injection",
+      "path": "positive/worker.js",
+      "start": {"line": 11, "col": 3, "offset": 0},
+      "end": {"line": 11, "col": 41, "offset": 0},
+      "extra": {
+        "message": "Untrusted request data reaches an operating-system command execution function.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "confidence": "HIGH",
+          "cwe": ["CWE-78: Improper Neutralization of Special Elements used in an OS Command"],
+          "technology": ["javascript"]
+        },
+        "lines": "  childProcess.exec(form.get(\"command\"));",
+        "dataflow_trace": {
+          "taint_source": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 11, "col": 21, "offset": 0},
+                "end": {"line": 11, "col": 40, "offset": 0}
+              },
+              "form.get(\"command\")"
+            ]
+          ],
+          "intermediate_vars": [],
+          "taint_sink": [
+            "CliLoc",
+            [
+              {
+                "path": "positive/worker.js",
+                "start": {"line": 11, "col": 21, "offset": 0},
+                "end": {"line": 11, "col": 40, "offset": 0}
+              },
+              "form.get(\"command\")"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "paths": {"scanned": ["positive/worker.js"]}
+}

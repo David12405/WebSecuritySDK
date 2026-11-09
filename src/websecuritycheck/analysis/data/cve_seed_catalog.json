@@ -1,0 +1,218 @@
+{
+  "catalog_version": "2026.03",
+  "published_date": "2026-03-01",
+  "provider_name": "local_seed_catalog",
+  "description": "Curated offline seed catalog containing verified OWASP Top 10:2025 A05: Injection CVEs for MVP demonstration and offline testing.",
+  "products": [
+    {
+      "vendor": "djangoproject",
+      "product": "django",
+      "cpe_prefix": "cpe:2.3:a:djangoproject:django",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["django"],
+      "aliases": ["python-django"],
+      "allowed_categories": ["FRAMEWORK"]
+    },
+    {
+      "vendor": "wordpress",
+      "product": "wordpress",
+      "cpe_prefix": "cpe:2.3:a:wordpress:wordpress",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["wordpress"],
+      "aliases": ["wp"],
+      "allowed_categories": ["CMS", "PLATFORM"]
+    },
+    {
+      "vendor": "php",
+      "product": "php",
+      "cpe_prefix": "cpe:2.3:a:php:php",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["php", "php hypertext preprocessor"],
+      "aliases": ["php-runtime"],
+      "allowed_categories": ["RUNTIME"]
+    },
+    {
+      "vendor": "vmware",
+      "product": "spring_framework",
+      "cpe_prefix": "cpe:2.3:a:vmware:spring_framework",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["spring framework", "spring-framework", "spring mvc"],
+      "aliases": ["spring core", "spring-webmvc"],
+      "allowed_categories": ["FRAMEWORK"]
+    },
+    {
+      "vendor": "vmware",
+      "product": "spring_data_mongodb",
+      "cpe_prefix": "cpe:2.3:a:vmware:spring_data_mongodb",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["spring data mongodb", "spring-data-mongodb"],
+      "aliases": ["spring-mongodb"],
+      "allowed_categories": ["FRAMEWORK", "DATABASE"]
+    },
+    {
+      "vendor": "palletsprojects",
+      "product": "jinja",
+      "cpe_prefix": "cpe:2.3:a:palletsprojects:jinja",
+      "version_scheme": "NUMERIC_DOT",
+      "exact_names": ["jinja", "jinja2"],
+      "aliases": ["python-jinja", "python-jinja2"],
+      "allowed_categories": ["FRAMEWORK"]
+    }
+  ],
+  "advisories": [
+    {
+      "cve_id": "CVE-2022-28346",
+      "vendor": "djangoproject",
+      "product": "django",
+      "cpe_prefix": "cpe:2.3:a:djangoproject:django",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=2.2.0, <2.2.28; >=3.2.0, <3.2.13; >=4.0.0, <4.0.4",
+      "primary_cwe_id": "CWE-89",
+      "cwe_ids": ["CWE-89"],
+      "cvss_score": 9.8,
+      "injection_subtype": "SQL_INJECTION",
+      "injection_rationale": "SQL Injection via QuerySet.annotate(), aggregate(), and extra() with user-controlled column/alias names.",
+      "environmental_preconditions": [
+        "Application must pass untrusted dictionary keys directly into QuerySet.annotate(), aggregate(), or extra()."
+      ],
+      "summary": "Django SQL Injection in QuerySet.annotate(), aggregate(), and extra()",
+      "advisory_source": "Django Security Releases (2022-04-11) & NVD",
+      "published_date": "2022-04-12",
+      "advisory_url": "https://www.djangoproject.com/weblog/2022/apr/11/security-releases/",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2022-34265",
+      "vendor": "djangoproject",
+      "product": "django",
+      "cpe_prefix": "cpe:2.3:a:djangoproject:django",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=3.2.0, <3.2.14; >=4.0.0, <4.0.6",
+      "primary_cwe_id": "CWE-89",
+      "cwe_ids": ["CWE-89"],
+      "cvss_score": 9.8,
+      "injection_subtype": "SQL_INJECTION",
+      "injection_rationale": "SQL Injection in database functions Trunc() and Extract() via untrusted kind or lookup_name arguments.",
+      "environmental_preconditions": [
+        "Application must pass untrusted parameters to Trunc(kind) or Extract(lookup_name)."
+      ],
+      "summary": "Django SQL Injection in Trunc() and Extract() database functions",
+      "advisory_source": "Django Security Releases (2022-07-04) & NVD",
+      "published_date": "2022-07-05",
+      "advisory_url": "https://www.djangoproject.com/weblog/2022/jul/04/security-releases/",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2022-21661",
+      "vendor": "wordpress",
+      "product": "wordpress",
+      "cpe_prefix": "cpe:2.3:a:wordpress:wordpress",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=3.7.0, <5.8.3",
+      "primary_cwe_id": "CWE-89",
+      "cwe_ids": ["CWE-89"],
+      "cvss_score": 7.5,
+      "injection_subtype": "SQL_INJECTION",
+      "injection_rationale": "SQL Injection in WP_Query / WP_Tax_Query::clean_query via untrusted taxonomy query parameter.",
+      "environmental_preconditions": [
+        "Site core, theme, or plugin must execute WP_Query with untrusted tax_query array parameters."
+      ],
+      "summary": "WordPress SQL Injection in WP_Query tax_query",
+      "advisory_source": "WordPress 5.8.3 Security Release & GHSA-6676-cqfm-gw84",
+      "published_date": "2022-01-06",
+      "advisory_url": "https://wordpress.org/news/2022/01/wordpress-5-8-3-security-release/",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2024-4577",
+      "vendor": "php",
+      "product": "php",
+      "cpe_prefix": "cpe:2.3:a:php:php",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=8.1.0, <8.1.29; >=8.2.0, <8.2.20; >=8.3.0, <8.3.8",
+      "primary_cwe_id": "CWE-78",
+      "cwe_ids": ["CWE-78"],
+      "cvss_score": 9.8,
+      "injection_subtype": "OS_COMMAND_INJECTION",
+      "injection_rationale": "CGI Argument Injection on Windows due to Best-Fit character encoding conversion bypassing CVE-2012-1823.",
+      "environmental_preconditions": [
+        "PHP must run on Windows in CGI mode (e.g. Apache with mod_cgi or exposed PHP binary) under Best-Fit code pages (Traditional/Simplified Chinese, Japanese)."
+      ],
+      "summary": "PHP CGI Argument Injection vulnerability leading to Remote Code Execution on Windows",
+      "advisory_source": "PHP Security Advisory GHSA-3qgc-jrrr-25jv & NVD",
+      "published_date": "2024-06-09",
+      "advisory_url": "https://github.com/php/php-src/security/advisories/GHSA-3qgc-jrrr-25jv",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2022-22965",
+      "vendor": "vmware",
+      "product": "spring_framework",
+      "cpe_prefix": "cpe:2.3:a:vmware:spring_framework",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=5.2.0, <=5.2.19; >=5.3.0, <=5.3.17",
+      "primary_cwe_id": "CWE-94",
+      "cwe_ids": ["CWE-94"],
+      "cvss_score": 9.8,
+      "injection_subtype": "CODE_INJECTION",
+      "injection_rationale": "Remote Code Execution via Spring MVC Data Binding class.module.classLoader property override on JDK 9+.",
+      "environmental_preconditions": [
+        "Target must run on JDK 9+, use Spring MVC/WebFlux POJO parameter binding, and be packaged as a WAR deployed on Apache Tomcat."
+      ],
+      "summary": "Spring Framework Remote Code Execution via Data Binding (Spring4Shell)",
+      "advisory_source": "VMware Spring Security Advisory CVE-2022-22965 & NVD",
+      "published_date": "2022-04-01",
+      "advisory_url": "https://spring.io/security/cve-2022-22965",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2022-22980",
+      "vendor": "vmware",
+      "product": "spring_data_mongodb",
+      "cpe_prefix": "cpe:2.3:a:vmware:spring_data_mongodb",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=3.3.0, <=3.3.4; ==3.4.0",
+      "primary_cwe_id": "CWE-917",
+      "cwe_ids": ["CWE-917", "CWE-943"],
+      "cvss_score": 9.8,
+      "injection_subtype": "NOSQL_INJECTION",
+      "injection_rationale": "SpEL Expression / NoSQL Query Injection via untrusted parameters in @Query or @Aggregation MongoDB repository methods.",
+      "environmental_preconditions": [
+        "Application must define MongoDB repository methods with @Query or @Aggregation containing parameter-concatenated SpEL expressions."
+      ],
+      "summary": "Spring Data MongoDB SpEL Expression Injection vulnerability",
+      "advisory_source": "VMware Spring Security Advisory CVE-2022-22980 & NVD",
+      "published_date": "2022-06-20",
+      "advisory_url": "https://spring.io/security/cve-2022-22980",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    },
+    {
+      "cve_id": "CVE-2019-10906",
+      "vendor": "palletsprojects",
+      "product": "jinja",
+      "cpe_prefix": "cpe:2.3:a:palletsprojects:jinja",
+      "version_scheme": "NUMERIC_DOT",
+      "affected_range": ">=2.0.0, <2.10.1",
+      "primary_cwe_id": "CWE-94",
+      "cwe_ids": ["CWE-94", "CWE-1336"],
+      "cvss_score": 7.5,
+      "injection_subtype": "SSTI",
+      "injection_rationale": "Server-Side Template Injection Sandbox Escape via str.format_map in Jinja2 SandboxedEnvironment.",
+      "environmental_preconditions": [
+        "Application must execute untrusted template code within jinja2.sandbox.SandboxedEnvironment where str.format_map is callable."
+      ],
+      "summary": "Jinja2 Sandbox Escape Server-Side Template Injection via str.format_map",
+      "advisory_source": "Pallets Jinja Security Advisory GHSA-462w-v97r-4m45 & NVD",
+      "published_date": "2019-04-08",
+      "advisory_url": "https://palletsprojects.com/blog/jinja-2-10-1-released",
+      "provider_name": "local_seed_catalog",
+      "catalog_version": "2026.03"
+    }
+  ]
+}

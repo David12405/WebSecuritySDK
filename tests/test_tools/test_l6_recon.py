@@ -398,5 +398,9 @@ def test_server_registers_all_l6_tools():
         "passive_web_analysis",
         "fingerprint_web",
         "parse_api_spec",
+        "inspect_source_tree",
+        "read_source_file",
+        "search_source",
+        "analyze_source",
         "explore_browser",
     ]

@@ -14,6 +14,9 @@ dependencies = [
     "cryptography>=46",
     "pydantic>=2.11",
     "pyyaml>=6",
+    "tree-sitter>=0.23",
+    "tree-sitter-javascript>=0.23",
+    "tree-sitter-typescript>=0.23",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +40,8 @@ markers = [
     "live_tools: opt-in tests against an authorized lab target",
     "live_nmap: isolated opt-in Nmap tests against an authorized lab target",
     "live_agent: opt-in tests requiring an Agent model and credentials",
+    "live_m1_m2: opt-in WHITEBOX M1 to M2 tests against authorized lab targets",
+    "semgrep_cli: opt-in contracts requiring a local Semgrep executable",
 ]
 
 [tool.ruff]

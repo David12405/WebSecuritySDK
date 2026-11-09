@@ -1,5 +1,6 @@
-# Secrets
+# Secrets & Environments
 .env
+.env.*
 *.pem
 *.key
 
@@ -19,6 +20,7 @@ build/
 dist/
 .venv/
 venv/
+*.manifest.json
 
 # Tooling caches
 .pytest_cache/
@@ -27,6 +29,17 @@ venv/
 .benchmarks/
 .coverage
 htmlcov/
+
+# Node.js / Frontend / Cloudflare Workers
+node_modules/
+.wrangler/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Editors / OS
 .idea/
