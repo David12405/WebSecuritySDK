@@ -422,6 +422,16 @@ async def parse_api_spec(
     try:
         response, _redirects = await _fetch(http, target)
         if response.status_code < 200 or response.status_code >= 300:
+            # A 4xx is definitive - there is no spec at this URL, and fetching
+            # it again returns the same 404. Only a 5xx is worth a retry, so
+            # the client error is a non-retryable E_INVALID_TARGET rather than
+            # the retryable E_HTTP: without this the agent's spec guesses were
+            # each tried three times over.
+            if 400 <= response.status_code < 500:
+                raise ToolError(
+                    "E_INVALID_TARGET",
+                    f"no OpenAPI document at this URL (HTTP {response.status_code})",
+                )
             raise ToolError("E_HTTP", f"OpenAPI fetch returned HTTP {response.status_code}")
         result = parse_api_document(response.content, source_url=str(response.url))
         result.artifact_manifests = [{

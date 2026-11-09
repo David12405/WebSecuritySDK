@@ -9,26 +9,27 @@ skill's `description`: a missing security header belongs to `headers`, a
 cookie without `Secure` to `cookies`, and neither should report the other's
 finding. A merged report counts a problem once.
 
-`fingerprint` is registered but **parked** - `in_default_scan=False`, so
-`check_all` does not run it. It belongs to a shape that does not exist yet:
-reconnaissance that feeds a router, rather than a check that returns a
-verdict. Its own module says why, and the reason is measured rather than
-argued.
+`surface` is registered but **parked** - `in_default_scan=False`, so
+`check_all` does not run it. It is the multi-step recon check: fingerprint,
+crawl, probe, browse, parse a spec - each step chosen from the last. A scan
+of a site should not silently fan out into a crawl, so it runs by name only.
+Its own module says why. WhatWeb lives here now, folded into the recon step,
+rather than as a standalone `fingerprint` check that had to invent findings.
 """
 
 from .base import REGISTRY, Check, all_checks, get, register, scan_checks
 from .cookies import COOKIES
 from .cors import CORS
-from .fingerprint import FINGERPRINT
 from .headers import HEADERS
+from .surface import SURFACE
 from .tls import TLS
 
 __all__ = [
     "COOKIES",
     "CORS",
-    "FINGERPRINT",
     "HEADERS",
     "REGISTRY",
+    "SURFACE",
     "TLS",
     "Check",
     "all_checks",

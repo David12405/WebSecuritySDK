@@ -179,6 +179,7 @@ def _run(
         run_id=run_id,
         started_at=started,
         finished_at=datetime.now(UTC),
+        must_call=check.must_call,
     )
     _remember(result, check, settings, trace.tools_seen)
     return result

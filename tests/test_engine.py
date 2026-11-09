@@ -47,8 +47,8 @@ def test_every_check_is_registered() -> None:
     assert [check.name for check in all_checks()] == [
         "cookies",
         "cors",
-        "fingerprint",
         "headers",
+        "surface",
         "tls",
     ]
 
@@ -56,18 +56,18 @@ def test_every_check_is_registered() -> None:
 def test_a_scan_leaves_out_the_parked_checks() -> None:
     """`check_all` is a promise about a site, not a list of everything written.
 
-    `fingerprint` is registered, tested and runnable by name, and it is not
-    part of what "check this site" means - its findings rested on the page
-    title, which is a string the target chooses. A check that is still being
-    argued about does not get to answer on a developer's behalf.
+    `surface` is registered, tested and runnable by name, and it is not part of
+    what "check this site" means - it is a multi-step crawl, and a scan should
+    not silently fan out into one. A check that is still being argued about
+    does not get to answer on a developer's behalf.
     """
     assert [check.name for check in scan_checks()] == ["cookies", "cors", "headers", "tls"]
-    assert "fingerprint" in [check.name for check in all_checks()]
+    assert "surface" in [check.name for check in all_checks()]
 
 
 def test_a_parked_check_is_still_runnable_by_name() -> None:
     """Parked is not deleted. The work stays reachable."""
-    assert get("fingerprint").in_default_scan is False
+    assert get("surface").in_default_scan is False
 
 
 def test_each_check_loads_a_skill_that_names_its_required_topics() -> None:

@@ -1,4 +1,18 @@
+"""One full agent run.  Needs model credentials.
 
+    python examples/run_check.py https://example.com
+    python examples/run_check.py https://example.com --check headers --trace full
+    python examples/run_check.py https://example.com --json report.json --sarif report.sarif
+    python examples/run_check.py https://example.com --history h.db        # run twice to diff
+    python examples/run_check.py https://example.com --check surface --target-store recon.db
+
+The whole turn diagram end to end: the public API validates the scope, the
+runner builds an agent from the `Check`, the MCP server comes up, the policy
+hooks ride along, and a typed `CheckResult` comes back - for a caller who
+wrote no prompt and imported no agent framework.
+
+Reads `.env` for the provider key so the demo is one command.
+"""
 
 from __future__ import annotations
 

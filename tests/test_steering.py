@@ -388,7 +388,7 @@ def test_every_registered_check_declares_topics_steering_can_act_on() -> None:
     its own name alone, which for an underscored name no model ever writes
     means a rule that fires on every correct answer.
     """
-    for name in ("headers", "tls", "cookies", "cors", "fingerprint"):
+    for name in ("headers", "tls", "cookies", "cors", "surface"):
         check = get(name)
         assert check.required_coverage, f"{name} declares no coverage topics"
         for topic, aliases in check.required_coverage.items():

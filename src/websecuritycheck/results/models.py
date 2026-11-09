@@ -381,6 +381,7 @@ class CheckResult(BaseModel):
         started_at: datetime | None = None,
         finished_at: datetime | None = None,
         tools_ran: int | None = None,
+        must_call: Sequence[str] | None = None,
     ) -> CheckResult:
         """Assemble a result from the model's output and the run's own record.
 
@@ -392,6 +393,15 @@ class CheckResult(BaseModel):
         when the trace is filtered - `trace_level="off"` produces no steps
         at all, and counting those would turn "do not print a trace" into
         "every run failed".
+
+        `must_call` is the tools the check *required*. A tool error from a tool
+        it did not require does not fail the check: a recon check declares its
+        crawler and its spec parser optional, and the crawler being down or a
+        spec guess returning 404 is incidental to the surface it did map. Those
+        errors stay in `errors` for the reader; they just do not drag the
+        status to `failed` on their own. A single-tool check passes its one
+        required tool, so its tool errors still count - and a tool that failed
+        to measure leaves `tools_ran == 0`, which is `failed` regardless.
         """
         errors = list(errors)
         trace = list(trace)
@@ -410,10 +420,21 @@ class CheckResult(BaseModel):
         if measured == 0 and NO_TOOL_RAN not in errors:
             errors.append(NO_TOOL_RAN)
 
+        # Tool errors from tools the check did not require are incidental - they
+        # are reported, but they do not decide the status. Everything else
+        # (required-tool errors, scope, validation, injection) still does.
+        if must_call is None:
+            status_errors: Sequence[ErrorInfo] = errors
+        else:
+            required = set(must_call)
+            status_errors = [
+                e for e in errors if not (e.kind == "tool" and e.tool and e.tool not in required)
+            ]
+
         return cls(
             check=check,
             target=target,
-            status=decide_status(findings, errors, measured),
+            status=decide_status(findings, status_errors, measured),
             findings=findings,
             notes=output.notes,
             errors=errors,
