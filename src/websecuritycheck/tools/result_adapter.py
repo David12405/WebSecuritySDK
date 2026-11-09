@@ -101,14 +101,17 @@ class ToolResultAdapter:
             errors=[_text(result)] if failed and _text(result) else [],
         )
         processing = None
-        if not failed:
+        if not failed and isinstance(target, str):
             try:
-                current = (
-                    self.store.load_target(self.assessment_id, target)
-                    if isinstance(target, str)
-                    else None
+                current = self.store.load_target(self.assessment_id, target)
+                # The stable per-site id, so a fresh model does not default to
+                # TGT-001 and collide with another site under this assessment.
+                # The store keys it on the origin, so every URL of one site
+                # resolves to the same id and merges into the same model.
+                target_id = self.store.target_id_for(self.assessment_id, target)
+                processing = process_tool_result(
+                    execution, current_target_model=current, target_id=target_id
                 )
-                processing = process_tool_result(execution, current_target_model=current)
             except Exception as exc:
                 self.errors.append(
                     ErrorInfo(

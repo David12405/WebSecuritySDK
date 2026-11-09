@@ -8,11 +8,30 @@ from pathlib import Path
 from typing import Protocol
 
 from websecuritycheck.domain import ReconProcessingResult, TargetModel, ToolExecutionResult
+from websecuritycheck.recon.endpoints import normalize_origin
+
+
+def target_identity(target: str) -> str:
+    """The store key for a target: one site, not one URL.
+
+    A recon run probes many URLs of one site - the root, its assets, an API
+    path - and each is a tool call whose `target` is that exact URL. Keyed on
+    the raw URL, every probe became a separate stored target, so no single
+    `TargetModel` ever held a site's whole surface, and Module 2 (which reads
+    one model's endpoints) saw a fragment. Reducing the target to its origin
+    - `https://host[:port]`, the same form `recon.endpoints` gives an
+    endpoint's `origin` - collapses all of one site's URLs onto one identity,
+    so the sub-URLs become endpoints inside one model instead of targets of
+    their own. A non-URL target (an Nmap CIDR) has no origin and keeps its
+    raw form.
+    """
+    return normalize_origin(target)
 
 
 class TargetStore(Protocol):
     def load_target(self, assessment_id: str, target: str) -> TargetModel | None: ...
     def allocate_execution_id(self, assessment_id: str) -> str: ...
+    def target_id_for(self, assessment_id: str, target: str) -> str: ...
     def persist(
         self,
         execution: ToolExecutionResult,
@@ -81,7 +100,7 @@ class SQLiteTargetStore:
             """SELECT s.model_json FROM target_snapshots s
                JOIN targets t ON t.assessment_id=s.assessment_id AND t.target_id=s.target_id
                WHERE t.assessment_id=? AND t.canonical_target=?""",
-            (assessment_id, target),
+            (assessment_id, target_identity(target)),
         ).fetchone()
         return TargetModel.model_validate(json.loads(row[0])) if row else None
 
@@ -93,10 +112,23 @@ class SQLiteTargetStore:
         ).fetchone()
         return f"EXEC-{int(row[0]) + 1:03d}"
 
+    def target_id_for(self, assessment_id: str, target: str) -> str:
+        """The stable `TGT-xxx` id for a site, allocating one on first sight.
+
+        Public so the adapter can pass it into `process_tool_result`: the
+        pipeline otherwise defaults every fresh model to `TGT-001`, and two
+        different sites under one assessment would collide on that id and
+        overwrite each other's snapshot. Keyed on the origin, so one site has
+        one id for the life of the assessment however many of its URLs are
+        probed.
+        """
+        return self._target_id(assessment_id, target)
+
     def _target_id(self, assessment_id: str, target: str) -> str:
+        identity = target_identity(target)
         row = self._connection.execute(
             "SELECT target_id FROM targets WHERE assessment_id=? AND canonical_target=?",
-            (assessment_id, target),
+            (assessment_id, identity),
         ).fetchone()
         if row:
             return str(row[0])
@@ -110,7 +142,7 @@ class SQLiteTargetStore:
         target_id = f"TGT-{int(row[0]) + 1:03d}"
         self._connection.execute(
             "INSERT INTO targets(assessment_id, canonical_target, target_id) VALUES (?, ?, ?)",
-            (assessment_id, target, target_id),
+            (assessment_id, identity, target_id),
         )
         return target_id
 
@@ -119,7 +151,9 @@ class SQLiteTargetStore:
         execution: ToolExecutionResult,
         processing: ReconProcessingResult | None,
     ) -> None:
-        target = execution.target or ""
+        # The site identity, not the exact URL probed: all of a site's URLs
+        # key onto one target. The raw URL stays in the journalled execution.
+        target = target_identity(execution.target or "")
         with self._connection:
             target_id = self._target_id(execution.assessment_id, target) if target else None
             self._connection.execute(
