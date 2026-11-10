@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "target": "api",
+  "workerName": "api-target",
+  "description": "Ground truth oracle for REST API testing API discovery, OpenAPI 3.x parsing, path/query/header inputs, and nested JSON body inputs. This file is test oracle data only; the AI Agent must never read this during reconnaissance.",
+  "notFoundProbe": {
+    "path": "/__recon_not_found__",
+    "expect": {
+      "status": 404,
+      "contentType": "application/json"
+    }
+  },
+  "endpoints": [
+    {
+      "id": "A1",
+      "path": "/",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [],
+      "expectedDiscoverySources": ["HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["CRAWLER"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["api-target", "/openapi.json"]
+        }
+      }
+    },
+    {
+      "id": "A2",
+      "path": "/openapi.json",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [],
+      "expectedDiscoverySources": ["HTTP_OBSERVATION", "MANUAL"],
+      "optionalDiscoverySources": ["CRAWLER"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/openapi.json",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["openapi", "3.0.3", "/api/users", "/api/orders"]
+        }
+      }
+    },
+    {
+      "id": "A3",
+      "path": "/api/users",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "id",
+          "location": "QUERY",
+          "dataType": "integer",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["API_SPEC", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["CRAWLER"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": true
+      },
+      "probe": {
+        "request": {
+          "path": "/api/users?id=1",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["alice", "admin"]
+        }
+      }
+    },
+    {
+      "id": "A4",
+      "path": "/api/users/{id}",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "id",
+          "location": "PATH",
+          "dataType": "integer",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["API_SPEC", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["CRAWLER"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": true
+      },
+      "probe": {
+        "request": {
+          "path": "/api/users/2",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["bob", "analyst"]
+        }
+      }
+    },
+    {
+      "id": "A5",
+      "path": "/api/search",
+      "method": "POST",
+      "requestContentTypes": ["application/json"],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "keyword",
+          "location": "JSON_BODY",
+          "dataType": "string",
+          "required": true
+        },
+        {
+          "name": "filters",
+          "location": "JSON_BODY",
+          "dataType": "object",
+          "required": false
+        },
+        {
+          "name": "filters.category",
+          "location": "JSON_BODY",
+          "dataType": "string",
+          "required": false,
+          "parent": "filters"
+        },
+        {
+          "name": "filters.minPrice",
+          "location": "JSON_BODY",
+          "dataType": "number",
+          "required": false,
+          "parent": "filters"
+        }
+      ],
+      "expectedDiscoverySources": ["API_SPEC", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": [],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": true
+      },
+      "probe": {
+        "request": {
+          "path": "/api/search",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "{\"keyword\":\"book\",\"filters\":{\"category\":\"book\",\"minPrice\":20}}"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["results", "Network Protocol Internals"]
+        }
+      }
+    },
+    {
+      "id": "A6",
+      "path": "/api/orders",
+      "method": "POST",
+      "requestContentTypes": ["application/json"],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "productId",
+          "location": "JSON_BODY",
+          "dataType": "integer",
+          "required": true
+        },
+        {
+          "name": "quantity",
+          "location": "JSON_BODY",
+          "dataType": "integer",
+          "required": true
+        },
+        {
+          "name": "shipping",
+          "location": "JSON_BODY",
+          "dataType": "object",
+          "required": true
+        },
+        {
+          "name": "shipping.city",
+          "location": "JSON_BODY",
+          "dataType": "string",
+          "required": true,
+          "parent": "shipping"
+        },
+        {
+          "name": "shipping.country",
+          "location": "JSON_BODY",
+          "dataType": "string",
+          "required": true,
+          "parent": "shipping"
+        }
+      ],
+      "expectedDiscoverySources": ["API_SPEC", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": [],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": true
+      },
+      "probe": {
+        "request": {
+          "path": "/api/orders",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "{\"productId\":1,\"quantity\":2,\"shipping\":{\"city\":\"Da Nang\",\"country\":\"VN\"}}"
+        },
+        "expect": {
+          "status": 201,
+          "contentType": "application/json",
+          "bodyContains": ["ORD-1-2", "accepted"]
+        }
+      }
+    },
+    {
+      "id": "A7",
+      "path": "/api/client-info",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "X-Test-Client",
+          "location": "HEADER",
+          "dataType": "string",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["API_SPEC", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": [],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": false,
+        "requiresInteraction": false,
+        "inSpec": true
+      },
+      "probe": {
+        "request": {
+          "path": "/api/client-info",
+          "method": "GET",
+          "headers": {
+            "X-Test-Client": "web-security-agent"
+          }
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["web-security-agent", "verified"]
+        }
+      }
+    }
+  ]
+}
