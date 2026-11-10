@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "target": "spa",
+  "workerName": "spa-target",
+  "description": "Ground truth oracle for Single Page Application testing static crawling vs browser/runtime discovery, XHR/fetch discovery, and DOM click-triggered API execution. This file is test oracle data only; the AI Agent must never read this during reconnaissance.",
+  "notFoundProbe": {
+    "path": "/__recon_not_found__",
+    "expect": {
+      "status": 404,
+      "contentType": "application/json"
+    }
+  },
+  "endpoints": [
+    {
+      "id": "S1",
+      "path": "/",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["text/html"],
+      "inputs": [
+        {
+          "name": "keyword",
+          "location": "DOM",
+          "dataType": "string",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION", "BROWSER"],
+      "optionalDiscoverySources": [],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "text/html",
+          "bodyContains": ["SPA Recon Target", "/app.js"]
+        }
+      }
+    },
+    {
+      "id": "S2",
+      "path": "/app.js",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/javascript", "text/javascript"],
+      "inputs": [],
+      "expectedDiscoverySources": ["CRAWLER", "BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/app.js",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "javascript",
+          "bodyContains": ["loadCategories", "loadProducts", "btn-search"]
+        }
+      }
+    },
+    {
+      "id": "S3",
+      "path": "/api/products",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [],
+      "expectedDiscoverySources": ["BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/api/products",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["Product A", "Product B"]
+        }
+      }
+    },
+    {
+      "id": "S4",
+      "path": "/api/categories",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [],
+      "expectedDiscoverySources": ["BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/api/categories",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["Books", "Electronics"]
+        }
+      }
+    },
+    {
+      "id": "S5",
+      "path": "/api/search",
+      "method": "POST",
+      "requestContentTypes": ["application/json"],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "keyword",
+          "location": "JSON_BODY",
+          "dataType": "string",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": true,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/api/search",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "{\"keyword\":\"Product\"}"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["results", "Product A"]
+        }
+      }
+    },
+    {
+      "id": "S6",
+      "path": "/api/products/{id}",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "id",
+          "location": "PATH",
+          "dataType": "integer",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": true,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/api/products/1",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["Product A", "Details for product 1"]
+        }
+      }
+    },
+    {
+      "id": "S7",
+      "path": "/api/cart",
+      "method": "POST",
+      "requestContentTypes": ["application/json"],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "productId",
+          "location": "JSON_BODY",
+          "dataType": "integer",
+          "required": true
+        },
+        {
+          "name": "quantity",
+          "location": "JSON_BODY",
+          "dataType": "integer",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["BROWSER"],
+      "optionalDiscoverySources": ["SOURCE_CODE"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": true,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/api/cart",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "{\"productId\":1,\"quantity\":2}"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["added", "productId"]
+        }
+      }
+    }
+  ]
+}

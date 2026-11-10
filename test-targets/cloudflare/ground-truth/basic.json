@@ -1,0 +1,319 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "target": "basic",
+  "workerName": "basic-target",
+  "description": "Ground truth oracle for basic HTML application testing crawler and HTTP reconnaissance. This file is test oracle data only; the AI Agent must never read this during reconnaissance.",
+  "notFoundProbe": {
+    "path": "/__recon_not_found__",
+    "expect": {
+      "status": 404,
+      "contentType": "application/json"
+    }
+  },
+  "endpoints": [
+    {
+      "id": "B1",
+      "path": "/",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["text/html"],
+      "inputs": [],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["BROWSER"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "text/html",
+          "bodyContains": ["Basic Recon Target", "/search?q=test", "/redirect", "/cookie", "/headers"]
+        }
+      }
+    },
+    {
+      "id": "B2",
+      "path": "/search",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["text/html"],
+      "inputs": [
+        {
+          "name": "q",
+          "location": "QUERY",
+          "dataType": "string",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["BROWSER"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/search?q=test",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "text/html",
+          "bodyContains": ["Search Results", "test"]
+        }
+      }
+    },
+    {
+      "id": "B3",
+      "path": "/redirect",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": [],
+      "inputs": [],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["BROWSER"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/redirect",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 302,
+          "location": "/final"
+        }
+      }
+    },
+    {
+      "id": "B4",
+      "path": "/final",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["text/html"],
+      "inputs": [],
+      "expectedDiscoverySources": ["HTTP_OBSERVATION", "CRAWLER"],
+      "optionalDiscoverySources": ["BROWSER"],
+      "discoverability": {
+        "staticCrawl": false,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/final",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "text/html",
+          "bodyContains": ["Final Destination", "Redirect landed successfully."]
+        }
+      }
+    },
+    {
+      "id": "B5",
+      "path": "/cookie",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "test_session",
+          "location": "COOKIE",
+          "dataType": "string",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["BROWSER"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/cookie",
+          "method": "GET"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "setCookieName": "test_session"
+        }
+      }
+    },
+    {
+      "id": "B6",
+      "path": "/headers",
+      "method": "GET",
+      "requestContentTypes": [],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "x-test-header",
+          "location": "HEADER",
+          "dataType": "string",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER", "HTTP_OBSERVATION"],
+      "optionalDiscoverySources": ["MANUAL"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/headers",
+          "method": "GET",
+          "headers": {
+            "x-test-header": "test-val"
+          }
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["headers", "test-val"]
+        }
+      }
+    },
+    {
+      "id": "B7",
+      "path": "/login",
+      "method": "POST",
+      "requestContentTypes": ["application/x-www-form-urlencoded"],
+      "responseContentTypes": ["text/html"],
+      "inputs": [
+        {
+          "name": "username",
+          "location": "FORM",
+          "dataType": "string",
+          "required": true
+        },
+        {
+          "name": "password",
+          "location": "FORM",
+          "dataType": "string",
+          "required": true
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER"],
+      "optionalDiscoverySources": ["BROWSER", "HTTP_OBSERVATION"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/login",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "username=alice&password=secret"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "text/html",
+          "bodyContains": ["Login form received for alice", "No authentication is performed"]
+        }
+      }
+    },
+    {
+      "id": "B8",
+      "path": "/form",
+      "method": "POST",
+      "requestContentTypes": ["application/x-www-form-urlencoded"],
+      "responseContentTypes": ["application/json"],
+      "inputs": [
+        {
+          "name": "full_name",
+          "location": "FORM",
+          "dataType": "string",
+          "required": false
+        },
+        {
+          "name": "email",
+          "location": "FORM",
+          "dataType": "string",
+          "required": false
+        },
+        {
+          "name": "age",
+          "location": "FORM",
+          "dataType": "integer",
+          "required": false
+        },
+        {
+          "name": "country",
+          "location": "FORM",
+          "dataType": "string",
+          "required": false
+        },
+        {
+          "name": "comment",
+          "location": "FORM",
+          "dataType": "string",
+          "required": false
+        },
+        {
+          "name": "subscribe",
+          "location": "FORM",
+          "dataType": "boolean",
+          "required": false
+        },
+        {
+          "name": "source",
+          "location": "FORM",
+          "dataType": "string",
+          "required": false
+        }
+      ],
+      "expectedDiscoverySources": ["CRAWLER"],
+      "optionalDiscoverySources": ["BROWSER", "HTTP_OBSERVATION"],
+      "discoverability": {
+        "staticCrawl": true,
+        "runtimeBrowser": true,
+        "requiresInteraction": false,
+        "inSpec": false
+      },
+      "probe": {
+        "request": {
+          "path": "/form",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          "body": "full_name=Bob&email=bob@example.com&age=30&country=VN&comment=hello&subscribe=true&source=home"
+        },
+        "expect": {
+          "status": 200,
+          "contentType": "application/json",
+          "bodyContains": ["full_name", "email", "age", "country", "comment", "subscribe", "source"]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "api-target",
+  "main": "src/index.js",
+  "compatibility_date": "2024-11-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "dev": {
+    "port": 8788
+  }
+}
