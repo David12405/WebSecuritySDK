@@ -33,12 +33,16 @@ class AsyncSourceAnalysisPort(Protocol):
 def _validate_layer6_startup_env() -> str | None:
     """Validate Layer 6 process-environment startup dependencies without mutating os.environ."""
     env_exec = os.environ.get("WEBSEC_OPENGREP_PATH")
-    if env_exec is not None and (
-        not isinstance(env_exec, str)
-        or not env_exec
-        or "\x00" in env_exec
-        or any(ord(c) < 32 for c in env_exec)
-        or env_exec.startswith("-")
+    if (
+        env_exec is not None
+        and env_exec != ""
+        and (
+            not isinstance(env_exec, str)
+            or not env_exec.strip()
+            or "\x00" in env_exec
+            or any(ord(c) < 32 for c in env_exec)
+            or env_exec.startswith("-")
+        )
     ):
         raise ToolError(
             "E_TOOL_UNAVAILABLE",
@@ -46,7 +50,7 @@ def _validate_layer6_startup_env() -> str | None:
         )
 
     env_ruleset = os.environ.get("WEBSEC_OPENGREP_RULESET")
-    if env_ruleset is not None:
+    if env_ruleset is not None and env_ruleset != "":
         return validate_offline_ruleset_path(env_ruleset)
     return None
 

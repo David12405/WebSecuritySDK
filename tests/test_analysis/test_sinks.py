@@ -328,6 +328,38 @@ def test_strict_offline_ruleset_and_layer6_startup_env_validation(tmp_path: Path
     assert compute_ruleset_sha256(valid_yaml) != first_digest
 
 
+def test_empty_env_vars_do_not_break_explicit_ruleset_or_hide_invalid_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    valid_yaml = tmp_path / "explicit.yaml"
+    valid_yaml.write_text("rules: []", encoding="utf-8")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    async def fake_runner(argv: list[str], cwd: Path, output_path: Path, stderr_path: Path) -> int:
+        output_path.write_text(
+            json.dumps({"results": [], "errors": [], "paths": {"scanned": []}}), encoding="utf-8"
+        )
+        return 0
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "")
+    monkeypatch.setenv("WEBSEC_OPENGREP_RULESET", "")
+
+    # Explicit ruleset_path still succeeds when env vars are blank strings (e.g. from .env).
+    adapter = LocalOpengrepAdapter(ruleset_path=valid_yaml, runner=fake_runner)
+    res = asyncio.run(adapter.analyze(str(repo_dir)))
+    assert res["data"]["ruleset_ref"] == "explicit.yaml"
+
+    # Without explicit ruleset_path, blank env still enforces strict offline policy.
+    with pytest.raises(ToolError, match="Strict offline Opengrep policy requires"):
+        asyncio.run(LocalOpengrepAdapter(runner=fake_runner).analyze(str(repo_dir)))
+
+    # Whitespace-only WEBSEC_OPENGREP_PATH is still rejected as invalid.
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "   ")
+    with pytest.raises(ToolError, match="WEBSEC_OPENGREP_PATH is invalid"):
+        asyncio.run(adapter.analyze(str(repo_dir)))
+
+
 # 7. test_concurrent_adapter_executions_with_different_local_rulesets_and_provenance
 @async_test
 async def test_concurrent_adapter_executions_with_different_local_rulesets_and_provenance(

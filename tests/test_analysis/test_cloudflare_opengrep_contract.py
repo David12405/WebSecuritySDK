@@ -354,6 +354,7 @@ def test_optional_community_rules_are_untrusted_audit_only() -> None:
 
 
 def test_opengrep_cli_prerequisite_message_is_actionable() -> None:
-    executable = os.getenv("WEBSEC_OPENGREP_PATH", "")
+    executable = os.getenv("WEBSEC_OPENGREP_PATH", "").strip()
     if executable:
-        assert Path(executable).is_file() or shutil.which(executable)
+        expanded = os.path.expanduser(executable) if executable.startswith("~") else executable
+        assert Path(expanded).is_file() or shutil.which(expanded)

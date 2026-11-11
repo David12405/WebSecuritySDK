@@ -272,11 +272,13 @@ def assessment(case: TargetCase) -> AssessmentConfig:
 
 
 def resolve_primary_ruleset() -> Path:
-    executable = os.getenv("WEBSEC_OPENGREP_PATH", "").strip()
+    raw_exec = os.getenv("WEBSEC_OPENGREP_PATH", "").strip() or "opengrep"
+    executable = os.path.expanduser(raw_exec) if raw_exec.startswith("~") else raw_exec
     configured = os.getenv("WEBSEC_OPENGREP_RULESET", "").strip()
-    if not executable or not configured:
+    if not configured:
         raise LiveDependencyError(
-            "set WEBSEC_OPENGREP_PATH and WEBSEC_OPENGREP_RULESET for WHITEBOX scanning"
+            "set WEBSEC_OPENGREP_RULESET (and WEBSEC_OPENGREP_PATH if opengrep is not on PATH) "
+            "for WHITEBOX scanning"
         )
     if not (Path(executable).is_file() or shutil.which(executable)):
         raise LiveDependencyError(f"Opengrep executable is unavailable: {executable}")

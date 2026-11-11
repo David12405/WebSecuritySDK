@@ -287,6 +287,27 @@ def test_opengrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
         run(opengrep.analyze_source(str(approved), runner=fake_runner))
 
 
+def test_opengrep_empty_env_vars_fall_back_and_whitespace_fails(tmp_path: Path, monkeypatch):
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    seen_argv: list[str] = []
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        seen_argv.extend(argv)
+        output_path.write_text(json.dumps({"results": [], "errors": []}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "")
+    monkeypatch.setenv("WEBSEC_OPENGREP_RULESET", "")
+    result = run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
+    assert seen_argv[0] == opengrep.DEFAULT_OPENGREP_PATH
+    assert f"--config={opengrep.DEFAULT_RULESET}" in seen_argv
+    assert result["data"]["ruleset"] == opengrep.DEFAULT_RULESET
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "   ")
+    with pytest.raises(ToolError, match="Opengrep configuration is invalid"):
+        run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
+
+
 def test_mcp_registration_is_backward_compatible():
     names = {tool.__name__ for tool in server.TOOLS}
     assert {

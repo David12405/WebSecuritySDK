@@ -80,11 +80,11 @@ class OpengrepAnalysisResult(_Model):
 
 
 def _configuration(value: str | None, *, executable: bool = False) -> str:
-    if value is None:
+    if value is None or value == "":
         return DEFAULT_OPENGREP_PATH if executable else DEFAULT_RULESET
     if (
         not isinstance(value, str)
-        or not value
+        or not value.strip()
         or "\x00" in value
         or any(ord(c) < 32 for c in value)
     ):
@@ -92,7 +92,7 @@ def _configuration(value: str | None, *, executable: bool = False) -> str:
     if value.startswith("-"):
         raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep configuration is invalid")
     if executable:
-        return value
+        return os.path.expanduser(value) if value.startswith("~") else value
     if _REGISTRY_RULESET.fullmatch(value):
         return value
     local = Path(value)
