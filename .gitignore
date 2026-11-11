@@ -20,6 +20,9 @@ build/
 dist/
 .venv/
 venv/
+# Semgrep has no Windows build, so the live M1->M2 capture runs from a
+# separate interpreter inside WSL.
+.venv-wsl/
 *.manifest.json
 
 # Tooling caches

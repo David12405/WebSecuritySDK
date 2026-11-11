@@ -1,0 +1,711 @@
+{
+  "evidence_records": [
+    {
+      "artifact_ref": "http-exchange-2d8e5ec310a740a9",
+      "artifact_type": "HTTP_RAW_EXCHANGE",
+      "assessment_id": "ASM-103",
+      "captured_at": "2026-11-11T02:43:37.783644Z",
+      "evidence_id": "EVD-001",
+      "execution_ref": "EXEC-001",
+      "media_type": "application/json",
+      "metadata": {
+        "result_type": "HTTPProbeResult"
+      },
+      "provenance": {
+        "assessment_id": "ASM-103",
+        "execution_id": "EXEC-001",
+        "result_type": "HTTPProbeResult",
+        "tool_id": "probe_http"
+      },
+      "redaction_applied": true,
+      "sha256_hash": "2d8e5ec310a740a9a25157fd5f446dc518b76dc251edf38de8e417a9f53f5252",
+      "size_bytes": 1163,
+      "source_tool_id": "probe_http",
+      "storage_uri": null,
+      "truncated": false
+    },
+    {
+      "artifact_ref": "openapi-document-0f9cc610889ea736",
+      "artifact_type": "TOOL_RAW_OUTPUT",
+      "assessment_id": "ASM-103",
+      "captured_at": "2026-11-11T02:43:38.126099Z",
+      "evidence_id": "EVD-002",
+      "execution_ref": "EXEC-002",
+      "media_type": "application/json; charset=utf-8",
+      "metadata": {
+        "result_type": "OPENAPI_SPEC"
+      },
+      "provenance": {
+        "assessment_id": "ASM-103",
+        "execution_id": "EXEC-002",
+        "result_type": "OPENAPI_SPEC",
+        "tool_id": "parse_api_spec"
+      },
+      "redaction_applied": false,
+      "sha256_hash": "0f9cc610889ea7363743167add67e6adab7601a207628000f6e9c0a570c5373f",
+      "size_bytes": 4090,
+      "source_tool_id": "parse_api_spec",
+      "storage_uri": null,
+      "truncated": false
+    }
+  ],
+  "observations": [
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-001"
+      ],
+      "execution_ref": "EXEC-001",
+      "observation_id": "OBS-001",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:37.783644Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "GET",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [],
+        "path": "/",
+        "request_content_types": [],
+        "response_content_types": [
+          "application/json; charset=utf-8"
+        ],
+        "response_headers": {},
+        "status": 200
+      },
+      "source_locator": null,
+      "source_tool_id": "probe_http",
+      "source_type": "HTTP_OBSERVATION",
+      "validated": true
+    },
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-002"
+      ],
+      "execution_ref": "EXEC-002",
+      "observation_id": "OBS-002",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "GET",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [
+          {
+            "content_type": null,
+            "data_type": "string",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "HEADER",
+            "name": "X-Test-Client",
+            "observation_refs": [],
+            "required": true
+          }
+        ],
+        "path": "/api/client-info",
+        "request_content_types": [],
+        "response_content_types": [],
+        "response_headers": {},
+        "status": null
+      },
+      "source_locator": "operations[0]",
+      "source_tool_id": "parse_api_spec",
+      "source_type": "API_SPEC",
+      "validated": true
+    },
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-002"
+      ],
+      "execution_ref": "EXEC-002",
+      "observation_id": "OBS-003",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "POST",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "productId",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "quantity",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping.city",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping.country",
+            "observation_refs": [],
+            "required": null
+          }
+        ],
+        "path": "/api/orders",
+        "request_content_types": [
+          "application/json"
+        ],
+        "response_content_types": [],
+        "response_headers": {},
+        "status": null
+      },
+      "source_locator": "operations[1]",
+      "source_tool_id": "parse_api_spec",
+      "source_type": "API_SPEC",
+      "validated": true
+    },
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-002"
+      ],
+      "execution_ref": "EXEC-002",
+      "observation_id": "OBS-004",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "POST",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters.category",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters.minPrice",
+            "observation_refs": [],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "keyword",
+            "observation_refs": [],
+            "required": null
+          }
+        ],
+        "path": "/api/search",
+        "request_content_types": [
+          "application/json"
+        ],
+        "response_content_types": [],
+        "response_headers": {},
+        "status": null
+      },
+      "source_locator": "operations[2]",
+      "source_tool_id": "parse_api_spec",
+      "source_type": "API_SPEC",
+      "validated": true
+    },
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-002"
+      ],
+      "execution_ref": "EXEC-002",
+      "observation_id": "OBS-005",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "GET",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [
+          {
+            "content_type": null,
+            "data_type": "integer",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "QUERY",
+            "name": "id",
+            "observation_refs": [],
+            "required": false
+          }
+        ],
+        "path": "/api/users",
+        "request_content_types": [],
+        "response_content_types": [],
+        "response_headers": {},
+        "status": null
+      },
+      "source_locator": "operations[3]",
+      "source_tool_id": "parse_api_spec",
+      "source_type": "API_SPEC",
+      "validated": true
+    },
+    {
+      "assessment_id": "ASM-103",
+      "evidence_refs": [
+        "EVD-002"
+      ],
+      "execution_ref": "EXEC-002",
+      "observation_id": "OBS-006",
+      "observation_type": "ENDPOINT",
+      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "payload": {
+        "declared_security": [],
+        "kind": "endpoint",
+        "method": "GET",
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "parameters": [
+          {
+            "content_type": null,
+            "data_type": "integer",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "PATH",
+            "name": "id",
+            "observation_refs": [],
+            "required": true
+          }
+        ],
+        "path": "/api/users/{id}",
+        "request_content_types": [],
+        "response_content_types": [],
+        "response_headers": {},
+        "status": null
+      },
+      "source_locator": "operations[4]",
+      "source_tool_id": "parse_api_spec",
+      "source_type": "API_SPEC",
+      "validated": true
+    }
+  ],
+  "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+  "target_model": {
+    "assessment_id": "ASM-103",
+    "assets": [
+      "https://api-target.7an6rando.workers.dev",
+      "https://api-target.7an6rando.workers.dev/openapi.json"
+    ],
+    "endpoints": [
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "HTTP_OBSERVATION"
+        ],
+        "endpoint_id": "79a132986b7c",
+        "evidence_refs": [
+          "EVD-001"
+        ],
+        "method": "GET",
+        "observation_refs": [
+          "OBS-001"
+        ],
+        "observed_parameters": [],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/",
+        "request_content_types": [],
+        "required_auth_role": null,
+        "response_content_types": [
+          "application/json"
+        ]
+      },
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "5bf26076b8fd",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "method": "GET",
+        "observation_refs": [
+          "OBS-002"
+        ],
+        "observed_parameters": [
+          {
+            "content_type": null,
+            "data_type": "string",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "HEADER",
+            "name": "X-Test-Client",
+            "observation_refs": [
+              "OBS-002"
+            ],
+            "required": true
+          }
+        ],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/api/client-info",
+        "request_content_types": [],
+        "required_auth_role": null,
+        "response_content_types": []
+      },
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "method": "POST",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "observed_parameters": [
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "productId",
+            "observation_refs": [
+              "OBS-003"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "quantity",
+            "observation_refs": [
+              "OBS-003"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping",
+            "observation_refs": [
+              "OBS-003"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping.city",
+            "observation_refs": [
+              "OBS-003"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "shipping.country",
+            "observation_refs": [
+              "OBS-003"
+            ],
+            "required": null
+          }
+        ],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/api/orders",
+        "request_content_types": [
+          "application/json"
+        ],
+        "required_auth_role": null,
+        "response_content_types": []
+      },
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "4f3207dc5bf7",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "method": "POST",
+        "observation_refs": [
+          "OBS-004"
+        ],
+        "observed_parameters": [
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters",
+            "observation_refs": [
+              "OBS-004"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters.category",
+            "observation_refs": [
+              "OBS-004"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "filters.minPrice",
+            "observation_refs": [
+              "OBS-004"
+            ],
+            "required": null
+          },
+          {
+            "content_type": null,
+            "data_type": null,
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "JSON_BODY",
+            "name": "keyword",
+            "observation_refs": [
+              "OBS-004"
+            ],
+            "required": null
+          }
+        ],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/api/search",
+        "request_content_types": [
+          "application/json"
+        ],
+        "required_auth_role": null,
+        "response_content_types": []
+      },
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "6aca10a32fec",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "method": "GET",
+        "observation_refs": [
+          "OBS-005"
+        ],
+        "observed_parameters": [
+          {
+            "content_type": null,
+            "data_type": "integer",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "QUERY",
+            "name": "id",
+            "observation_refs": [
+              "OBS-005"
+            ],
+            "required": false
+          }
+        ],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/api/users",
+        "request_content_types": [],
+        "required_auth_role": null,
+        "response_content_types": []
+      },
+      {
+        "declared_security": [],
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "7c43f96c8352",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "method": "GET",
+        "observation_refs": [
+          "OBS-006"
+        ],
+        "observed_parameters": [
+          {
+            "content_type": null,
+            "data_type": "integer",
+            "evidence_refs": [
+              "EVD-002"
+            ],
+            "location": "PATH",
+            "name": "id",
+            "observation_refs": [
+              "OBS-006"
+            ],
+            "required": true
+          }
+        ],
+        "origin": "https://api-target.7an6rando.workers.dev",
+        "path": "/api/users/{id}",
+        "request_content_types": [],
+        "required_auth_role": null,
+        "response_content_types": []
+      }
+    ],
+    "last_updated": "2026-11-11T02:43:38.126099Z",
+    "revision": 2,
+    "schema_version": "3.0.0",
+    "scope_rules": {
+      "api_specification_ref": null,
+      "assessment_id": "ASM-103",
+      "auth_references": [],
+      "authorized_scope": [
+        "api-target.7an6rando.workers.dev"
+      ],
+      "excluded_scope": [],
+      "execution_policy": {
+        "allowed_capabilities": [],
+        "allowed_tool_ids": [],
+        "blocked_capabilities": [],
+        "blocked_tool_ids": [],
+        "browser_policy": {
+          "allow_file_download": false,
+          "allow_javascript": false,
+          "enabled": false,
+          "max_actions_per_session": 50,
+          "max_capture_bytes": 2000000,
+          "max_sessions": 1,
+          "timeout_seconds": 30.0
+        },
+        "http_policy": {
+          "allowed_methods": [
+            "GET",
+            "POST"
+          ],
+          "follow_redirects": false,
+          "max_capture_bytes": 1000000,
+          "max_redirects": 5,
+          "max_requests_per_minute": 60,
+          "request_budget": 1000,
+          "timeout_seconds": 10.0
+        },
+        "max_concurrent_actions": 1,
+        "max_execution_seconds": 300.0,
+        "network_scan_policy": {
+          "allowed_profiles": [],
+          "enabled": false,
+          "max_concurrent_scans": 1,
+          "max_hosts": 256,
+          "max_ports_per_host": 100,
+          "timeout_seconds": 120.0
+        }
+      },
+      "schema_version": "3.0.0",
+      "scope_approval": {
+        "approval_timestamp": "2026-01-01T00:00:00Z",
+        "approved_by": "live-whitebox-integration-test",
+        "is_approved": true,
+        "scope_signature_hash": "e721068294712004efbbdccb9b839406010b04aeaaef007d408c3868f276591e"
+      },
+      "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+      "target": "https://api-target.7an6rando.workers.dev/",
+      "testing_mode": "WHITEBOX"
+    },
+    "target_id": "TGT-103",
+    "technologies": []
+  }
+}

@@ -33,7 +33,7 @@ from websecuritycheck.analysis.semgrep_adapter import (
     LocalSemgrepAdapter,
     compute_ruleset_sha256,
 )
-from websecuritycheck.pipeline import build_default_recon_steps, run_pipeline
+from websecuritycheck.pipeline import build_default_recon_steps, collect_m1, run_module2
 
 LIVE_REQUIRED = pytest.mark.skipif(
     os.getenv("RUN_LIVE_M1_M2") != "1",
@@ -60,14 +60,23 @@ def test_capture_envelope_fixture(case: TargetCase) -> None:
     policy = trust_policy(compute_ruleset_sha256(ruleset))
     steps = build_default_recon_steps(case.url, specialized_tool=case.specialized_tool)
 
+    # Collected in two steps rather than through `run_pipeline`, because the
+    # envelope does not carry the Module 1 request and the request is worth
+    # keeping: it holds `TargetModel.endpoints`, the only place an endpoint id
+    # can be turned back into `POST /api/search`.
     try:
-        envelope = asyncio.run(
-            run_pipeline(
+        request = asyncio.run(
+            collect_m1(
                 config,
                 steps,
-                trust_policy=policy,
-                source_repo_path=str(case.source_root.resolve()),
                 target_id=_target_id(case),
+                source_repo_path=str(case.source_root.resolve()),
+            )
+        )
+        envelope = asyncio.run(
+            run_module2(
+                request,
+                trust_policy=policy,
                 analyzer=LocalSemgrepAdapter(ruleset_path=ruleset),
             )
         )
@@ -79,10 +88,18 @@ def test_capture_envelope_fixture(case: TargetCase) -> None:
     assert envelope.output.assessment_id == config.assessment_id
 
     CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
-    data = redact(envelope.model_dump(mode="json"))
-    path = CAPTURE_DIR / f"envelope_{case.name}.json"
+    path = _write(CAPTURE_DIR / f"envelope_{case.name}.json", envelope)
+    request_path = _write(CAPTURE_DIR / f"request_{case.name}.json", request)
+    print(
+        f"[capture] wrote {path} ({len(envelope.correlation.records)} correlation "
+        f"records) and {request_path} ({len(request.target_model.endpoints)} endpoints)"
+    )
+
+
+def _write(path: Path, model: object) -> Path:
+    data = redact(model.model_dump(mode="json"))
     path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    print(f"[capture] wrote {path} ({len(envelope.correlation.records)} correlation records)")
+    return path
