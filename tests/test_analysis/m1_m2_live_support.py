@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from mcp_servers.websec_tools import probes
 from mcp_servers.websec_tools.errors import ToolError
 from mcp_servers.websec_tools.recon import browser, openapi, zap
+from websecuritycheck.analysis.ast_taint import REVIEWED_AST_TAINT_PRODUCER
 from websecuritycheck.analysis.correlation import (
     ApprovedRulesetEntry,
     ApprovedRuleSpec,
@@ -28,15 +29,15 @@ from websecuritycheck.analysis.correlation import (
 )
 from websecuritycheck.analysis.cve import InjectionSubtype, extract_cve_candidates
 from websecuritycheck.analysis.inputs import extract_input_candidates
-from websecuritycheck.analysis.route_binding import (
-    REVIEWED_STATIC_ROUTE_PRODUCER,
-    extract_route_bindings,
-)
-from websecuritycheck.analysis.semgrep_adapter import (
-    LocalSemgrepAdapter,
+from websecuritycheck.analysis.opengrep_adapter import (
+    LocalOpengrepAdapter,
     compute_ruleset_sha256,
     validate_offline_ruleset_path,
     validate_source_analysis_scope,
+)
+from websecuritycheck.analysis.route_binding import (
+    REVIEWED_STATIC_ROUTE_PRODUCER,
+    extract_route_bindings,
 )
 from websecuritycheck.analysis.sinks import aextract_sink_candidates
 from websecuritycheck.domain import (
@@ -60,7 +61,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TARGETS_ROOT = PROJECT_ROOT / "test-targets" / "cloudflare" / "targets"
 RULES_ROOT = PROJECT_ROOT / "tests" / "test_analysis" / "rules"
 DEFAULT_RULESET = RULES_ROOT / "cloudflare-workers-injection.yml"
-DEFAULT_VENDOR_RULESET = RULES_ROOT / "vendor" / "semgrep-community"
+DEFAULT_VENDOR_RULESET = RULES_ROOT / "vendor" / "opengrep-community"
 RULESET_FIXTURE_ROOT = (
     PROJECT_ROOT / "tests" / "test_analysis" / "sample_sources" / "cloudflare_injection"
 )
@@ -77,7 +78,7 @@ EXPECTED_RULE_IDS = frozenset(
     }
 )
 # Sink line per rule in sample_sources/cloudflare_injection/positive/worker.js.
-# Semgrep dataflow traces are optional: the sink location is the required evidence.
+# Opengrep dataflow traces are verified alongside intra-procedural AST taint analysis.
 EXPECTED_SINK_LINES = {
     "cloudflare-workers.tainted-code-injection": 5,
     "cloudflare-workers.tainted-d1-sql-injection": 8,
@@ -271,17 +272,17 @@ def assessment(case: TargetCase) -> AssessmentConfig:
 
 
 def resolve_primary_ruleset() -> Path:
-    executable = os.getenv("WEBSEC_SEMGREP_PATH", "").strip()
-    configured = os.getenv("WEBSEC_SEMGREP_RULESET", "").strip()
+    executable = os.getenv("WEBSEC_OPENGREP_PATH", "").strip()
+    configured = os.getenv("WEBSEC_OPENGREP_RULESET", "").strip()
     if not executable or not configured:
         raise LiveDependencyError(
-            "set WEBSEC_SEMGREP_PATH and WEBSEC_SEMGREP_RULESET for WHITEBOX scanning"
+            "set WEBSEC_OPENGREP_PATH and WEBSEC_OPENGREP_RULESET for WHITEBOX scanning"
         )
     if not (Path(executable).is_file() or shutil.which(executable)):
-        raise LiveDependencyError(f"Semgrep executable is unavailable: {executable}")
+        raise LiveDependencyError(f"Opengrep executable is unavailable: {executable}")
     ruleset = Path(validate_offline_ruleset_path(configured))
     if ruleset.resolve() != DEFAULT_RULESET.resolve():
-        raise AssertionError(f"configure WEBSEC_SEMGREP_RULESET={DEFAULT_RULESET.resolve()}")
+        raise AssertionError(f"configure WEBSEC_OPENGREP_RULESET={DEFAULT_RULESET.resolve()}")
     return ruleset
 
 
@@ -327,7 +328,7 @@ def trust_policy(ruleset_digest: str) -> CorrelationTrustPolicy:
                         mode=RuleMode.TAINT,
                         sink_kind=SinkKind.CODE_EVAL,
                         subtype=InjectionSubtype.CODE_INJECTION,
-                        cwe_ids=frozenset({"CWE-95"}),
+                        cwe_ids=frozenset({"CWE-94", "CWE-95"}),
                     ),
                     ApprovedRuleSpec(
                         rule_id="cloudflare-workers.tainted-d1-sql-injection",
@@ -347,6 +348,7 @@ def trust_policy(ruleset_digest: str) -> CorrelationTrustPolicy:
             ),
         ),
         trusted_route_producers=(REVIEWED_STATIC_ROUTE_PRODUCER,),
+        trusted_taint_producers=(REVIEWED_AST_TAINT_PRODUCER,),
     )
 
 
@@ -537,7 +539,7 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
     requested_file = "positive/worker.js"
     trace.add(
         "ruleset",
-        "semgrep_positive_control",
+        "opengrep_positive_control",
         "started",
         requested_file=requested_file,
     )
@@ -554,28 +556,28 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
         diagnostics["duration_ms"] = round((time.perf_counter() - started) * 1000, 2)
         trace.add(
             "ruleset",
-            "semgrep_positive_control",
+            "opengrep_positive_control",
             "contract_failed",
             **{key: value for key, value in diagnostics.items() if key != "status"},
         )
         raise PrimaryRulesetContractError(f"{code}: {message}", dict(diagnostics))
 
     try:
-        envelope = await LocalSemgrepAdapter(ruleset_path=ruleset).analyze(
+        envelope = await LocalOpengrepAdapter(ruleset_path=ruleset).analyze(
             str(RULESET_FIXTURE_ROOT.resolve()), subpath=requested_file
         )
     except Exception as exc:
         fail("execution_failed", f"{type(exc).__name__}: {exc}")
 
     if not isinstance(envelope, dict):
-        fail("malformed_envelope", "Semgrep positive control returned malformed data")
+        fail("malformed_envelope", "Opengrep positive control returned malformed data")
     data = envelope.get("data")
     if not isinstance(data, dict):
-        fail("malformed_envelope", "Semgrep positive control returned malformed data")
+        fail("malformed_envelope", "Opengrep positive control returned malformed data")
 
     findings = data.get("findings")
     if not isinstance(findings, list):
-        fail("malformed_findings", "Semgrep positive control omitted findings")
+        fail("malformed_findings", "Opengrep positive control omitted findings")
 
     errors = data.get("errors")
     scanned = data.get("scanned_files")
@@ -603,7 +605,7 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
     }
     diagnostics.update(
         {
-            "semgrep_version": data.get("version"),
+            "opengrep_version": data.get("version"),
             "files_scanned": data.get("files_scanned"),
             "scanned_files": scanned,
             "errors": errors,
@@ -629,11 +631,11 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
         }
     )
     if not isinstance(errors, list):
-        fail("malformed_errors", "Semgrep positive control omitted its errors list")
+        fail("malformed_errors", "Opengrep positive control omitted its errors list")
     if errors:
-        fail("semgrep_error", f"Semgrep positive control reported errors: {errors!r}")
+        fail("opengrep_error", f"Opengrep positive control reported errors: {errors!r}")
     if data.get("files_scanned") == 0:
-        fail("zero_scan", "Semgrep positive control scanned zero files")
+        fail("zero_scan", "Opengrep positive control scanned zero files")
     if data.get("files_scanned") != 1:
         fail(
             "scan_count_mismatch",
@@ -658,14 +660,14 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
     result = {
         **diagnostics,
         "status": "completed",
-        "semgrep_version": data.get("version"),
+        "opengrep_version": data.get("version"),
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
     result.pop("failure_code", None)
     result.pop("error", None)
     trace.add(
         "ruleset",
-        "semgrep_positive_control",
+        "opengrep_positive_control",
         "completed",
         **{key: value for key, value in result.items() if key != "status"},
     )
@@ -673,7 +675,7 @@ async def verify_primary_ruleset(ruleset: Path, trace: Trace) -> dict[str, Any]:
 
 
 async def audit_community_rules(report: IntegrationReport) -> None:
-    configured = os.getenv("WEBSEC_SEMGREP_VENDOR_RULESET", "").strip()
+    configured = os.getenv("WEBSEC_OPENGREP_VENDOR_RULESET", "").strip()
     candidate = Path(configured) if configured else DEFAULT_VENDOR_RULESET
     if not candidate.exists():
         report.data["supplemental"]["community_rules"] = {"status": "not_configured"}
@@ -693,7 +695,7 @@ async def audit_community_rules(report: IntegrationReport) -> None:
         "sha256": compute_ruleset_sha256(approved),
         "file_sha256": ruleset_file_digests(approved),
         "upstream_revision": (
-            os.getenv("WEBSEC_SEMGREP_VENDOR_REVISION", "").strip()
+            os.getenv("WEBSEC_OPENGREP_VENDOR_REVISION", "").strip()
             or git_revision(approved)
         ),
         "trusted_for_m2": False,
@@ -701,7 +703,7 @@ async def audit_community_rules(report: IntegrationReport) -> None:
     }
     for case in TARGET_CASES:
         try:
-            payload = await LocalSemgrepAdapter(ruleset_path=approved).analyze(
+            payload = await LocalOpengrepAdapter(ruleset_path=approved).analyze(
                 str(case.source_root.resolve())
             )
         except ToolError as exc:
@@ -760,16 +762,16 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
     cve_result = extract_cve_candidates(request)
     sink_result = await aextract_sink_candidates(
         request,
-        analyzer=LocalSemgrepAdapter(ruleset_path=ruleset),
+        analyzer=LocalOpengrepAdapter(ruleset_path=ruleset),
         existing_evidence_ids={item.evidence_id for item in request.evidence_records},
     )
     failures = [
-        item for item in sink_result.limitations if "Semgrep static analysis failed" in item
+        item for item in sink_result.limitations if "Opengrep static analysis failed" in item
     ]
     assert not failures, "; ".join(failures)
-    assert "SEMGREP_SCAN_EMPTY" not in sink_result.limitations
+    assert "OPENGREP_SCAN_EMPTY" not in sink_result.limitations
     missing_scanned = sorted(set(expected_files) - set(sink_result.scanned_files))
-    assert not missing_scanned, f"Semgrep omitted approved source files: {missing_scanned}"
+    assert not missing_scanned, f"Opengrep omitted approved source files: {missing_scanned}"
 
     detected_rule_ids = {
         sink.rule_id
@@ -781,7 +783,7 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
     if case.expected_rule_ids:
         missing_rules = sorted(case.expected_rule_ids - detected_rule_ids)
         assert not missing_rules, (
-            f"Target {case.name} missing expected Semgrep sink rules: {missing_rules}, "
+            f"Target {case.name} missing expected Opengrep sink rules: {missing_rules}, "
             f"detected: {sorted(detected_rule_ids)}"
         )
 
@@ -860,7 +862,7 @@ async def run_target(case: TargetCase, ruleset: Path, trace: Trace) -> dict[str,
             "route_bindings": len(route_result.route_binding_artifacts),
             "correlations": len(correlation.records),
             "scan": {
-                "semgrep_version": sink_result.semgrep_version,
+                "opengrep_version": sink_result.opengrep_version,
                 "scanned_files": sink_result.scanned_files,
                 "missing_files": missing_scanned,
                 "ruleset_sha256": sink_result.ruleset_sha256,

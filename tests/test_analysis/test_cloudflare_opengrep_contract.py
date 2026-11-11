@@ -1,4 +1,4 @@
-"""Offline and local-CLI contracts for Cloudflare Worker Semgrep analysis."""
+"""Offline and local-CLI contracts for Cloudflare Worker Opengrep analysis."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from test_analysis.m1_m2_live_support import (
     assert_source_contract,
     source_files,
 )
-from websecuritycheck.analysis.semgrep_adapter import (
-    LocalSemgrepAdapter,
+from websecuritycheck.analysis.opengrep_adapter import (
+    LocalOpengrepAdapter,
     compute_ruleset_sha256,
     validate_offline_ruleset_path,
     validate_source_analysis_scope,
@@ -34,16 +34,16 @@ from websecuritycheck.analysis.sinks import extract_sink_candidates
 from websecuritycheck.domain import TestingMode
 from websecuritycheck.domain.analysis_models import ConfidenceLevel
 
-SEMGREP_REQUIRED = pytest.mark.skipif(
-    os.getenv("RUN_SEMGREP_CLI") != "1",
-    reason="set RUN_SEMGREP_CLI=1 to run local Semgrep CLI contracts",
+OPENGREP_REQUIRED = pytest.mark.skipif(
+    os.getenv("RUN_OPENGREP_CLI") != "1",
+    reason="set RUN_OPENGREP_CLI=1 to run local Opengrep CLI contracts",
 )
 
 
 def _configured_ruleset() -> Path:
-    configured = os.getenv("WEBSEC_SEMGREP_RULESET", "").strip()
+    configured = os.getenv("WEBSEC_OPENGREP_RULESET", "").strip()
     if not configured:
-        pytest.skip("set WEBSEC_SEMGREP_RULESET to the primary local ruleset")
+        pytest.skip("set WEBSEC_OPENGREP_RULESET to the primary local ruleset")
     ruleset = Path(validate_offline_ruleset_path(configured))
     assert ruleset.resolve() == DEFAULT_RULESET.resolve()
     return ruleset
@@ -70,7 +70,7 @@ def test_primary_preflight_zero_scan_has_report_safe_diagnostics(monkeypatch) ->
             assert subpath == "positive/worker.js"
             return {
                 "data": {
-                    "version": "1.183.0",
+                    "version": "1.6.0",
                     "status": "completed",
                     "files_scanned": 0,
                     "scanned_files": [],
@@ -80,13 +80,9 @@ def test_primary_preflight_zero_scan_has_report_safe_diagnostics(monkeypatch) ->
                 }
             }
 
-    monkeypatch.setattr(live_support, "LocalSemgrepAdapter", ZeroScanAdapter)
+    monkeypatch.setattr(live_support, "LocalOpengrepAdapter", ZeroScanAdapter)
     with pytest.raises(live_support.PrimaryRulesetContractError) as failure:
-        asyncio.run(
-            live_support.verify_primary_ruleset(
-                DEFAULT_RULESET, live_support.Trace()
-            )
-        )
+        asyncio.run(live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace()))
 
     diagnostics = failure.value.diagnostics
     assert diagnostics["status"] == "contract_failed"
@@ -105,7 +101,7 @@ def _traceless_preflight_adapter(sink_lines: dict[str, int]):
         async def analyze(self, target_root: str, subpath: str = "."):
             return {
                 "data": {
-                    "version": "1.183.0",
+                    "version": "1.6.0",
                     "status": "completed",
                     "files_scanned": 1,
                     "scanned_files": ["positive/worker.js"],
@@ -127,11 +123,9 @@ def _traceless_preflight_adapter(sink_lines: dict[str, int]):
 
 def test_primary_preflight_accepts_traceless_findings_at_expected_lines(monkeypatch) -> None:
     monkeypatch.setattr(
-        live_support, "LocalSemgrepAdapter", _traceless_preflight_adapter(EXPECTED_SINK_LINES)
+        live_support, "LocalOpengrepAdapter", _traceless_preflight_adapter(EXPECTED_SINK_LINES)
     )
-    result = asyncio.run(
-        live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace())
-    )
+    result = asyncio.run(live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace()))
     assert result["status"] == "completed"
     assert result["dataflow_traces_available"] is False
     assert result["traceless_rule_ids"] == sorted(EXPECTED_RULE_IDS)
@@ -140,14 +134,12 @@ def test_primary_preflight_accepts_traceless_findings_at_expected_lines(monkeypa
 
 def test_primary_preflight_rejects_wrong_sink_line(monkeypatch) -> None:
     shifted = {**EXPECTED_SINK_LINES, "cloudflare-workers.tainted-code-injection": 4}
-    monkeypatch.setattr(live_support, "LocalSemgrepAdapter", _traceless_preflight_adapter(shifted))
+    monkeypatch.setattr(live_support, "LocalOpengrepAdapter", _traceless_preflight_adapter(shifted))
     with pytest.raises(live_support.PrimaryRulesetContractError) as failure:
         asyncio.run(live_support.verify_primary_ruleset(DEFAULT_RULESET, live_support.Trace()))
     diagnostics = failure.value.diagnostics
     assert diagnostics["failure_code"] == "sink_line_mismatch"
-    assert diagnostics["sink_line_mismatch"] == {
-        "cloudflare-workers.tainted-code-injection": [4]
-    }
+    assert diagnostics["sink_line_mismatch"] == {"cloudflare-workers.tainted-code-injection": [4]}
 
 
 @pytest.mark.parametrize("case", TARGET_CASES, ids=lambda case: case.name)
@@ -161,23 +153,17 @@ def test_target_source_mapping_and_scope_are_offline_contracts(case) -> None:
         source_repository_ref=approved,
         testing_mode=TestingMode.WHITEBOX,
     )
-    accepted, refusal = validate_source_analysis_scope(
-        request, require_existing_filesystem=True
-    )
+    accepted, refusal = validate_source_analysis_scope(request, require_existing_filesystem=True)
     assert accepted == approved and refusal is None
 
     other = next(item for item in TARGET_CASES if item.name != case.name)
-    escaped = request.model_copy(
-        update={"source_repo_path": str(other.source_root.resolve())}
-    )
-    accepted, refusal = validate_source_analysis_scope(
-        escaped, require_existing_filesystem=True
-    )
+    escaped = request.model_copy(update={"source_repo_path": str(other.source_root.resolve())})
+    accepted, refusal = validate_source_analysis_scope(escaped, require_existing_filesystem=True)
     assert accepted is None and refusal and "outside" in refusal
 
 
 RECORDED_POSITIVE_OUTPUT = (
-    Path(__file__).resolve().parent / "data" / "semgrep_cloudflare_positive.json"
+    Path(__file__).resolve().parent / "data" / "opengrep_cloudflare_positive.json"
 )
 
 
@@ -220,7 +206,7 @@ def _assert_expected_sink_lines(findings) -> None:
 
 
 def test_recorded_positive_output_without_traces_still_yields_sinks() -> None:
-    """Semgrep 1.183 omits dataflow_trace; sink locations alone must still work."""
+    """Raw sink extraction preserves traceless payload invariants when AST enrichment is off."""
     recorded = json.loads(RECORDED_POSITIVE_OUTPUT.read_text(encoding="utf-8"))
     for result in recorded["results"]:
         result["extra"].pop("dataflow_trace", None)
@@ -228,21 +214,17 @@ def test_recorded_positive_output_without_traces_still_yields_sinks() -> None:
     async def traceless_runner(argv, cwd, output_path, stderr_path) -> int:
         relative_root = RULESET_FIXTURE_ROOT.resolve().relative_to(Path(cwd).resolve())
         prefix = "" if relative_root == Path(".") else f"{relative_root.as_posix()}/"
-        Path(output_path).write_text(
-            json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8"
-        )
+        Path(output_path).write_text(json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8")
         return 0
 
-    adapter = LocalSemgrepAdapter(ruleset_path=DEFAULT_RULESET, runner=traceless_runner)
-    positive = asyncio.run(
-        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
-    )
+    adapter = LocalOpengrepAdapter(ruleset_path=DEFAULT_RULESET, runner=traceless_runner)
+    positive = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js"))
     data = positive["data"]
     assert {item["rule_id"] for item in data["findings"]} == EXPECTED_RULE_IDS
     assert all(item["dataflow_trace"] is None for item in data["findings"])
     _assert_expected_sink_lines(data["findings"])
 
-    extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
+    extraction = extract_sink_candidates(_fixture_request(), opengrep_payload=positive)
     assert len(extraction.sink_candidates) == 3
     assert sorted(sc.start_line for sc in extraction.sink_candidates) == sorted(
         EXPECTED_SINK_LINES.values()
@@ -251,6 +233,13 @@ def test_recorded_positive_output_without_traces_still_yields_sinks() -> None:
         assert sc.has_static_taint_flow is False
         assert not sc.dataflow_steps
         assert sc.confidence == ConfidenceLevel.MEDIUM
+
+    # With enable_ast_taint=True, all 3 Cloudflare sinks resolve concrete accessors!
+    enriched = extract_sink_candidates(
+        _fixture_request(), opengrep_payload=positive, enable_ast_taint=True
+    )
+    assert all(sc.has_static_taint_flow for sc in enriched.sink_candidates)
+    assert all(sc.dataflow_steps for sc in enriched.sink_candidates)
 
 
 def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None:
@@ -261,17 +250,15 @@ def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None
         seen_argv.extend(argv)
         relative_root = RULESET_FIXTURE_ROOT.resolve().relative_to(Path(cwd).resolve())
         prefix = "" if relative_root == Path(".") else f"{relative_root.as_posix()}/"
-        Path(output_path).write_text(
-            json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8"
-        )
+        Path(output_path).write_text(json.dumps(_rebase_paths(recorded, prefix)), encoding="utf-8")
         return 0
 
-    adapter = LocalSemgrepAdapter(ruleset_path=DEFAULT_RULESET, runner=recorded_runner)
-    positive = asyncio.run(
-        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
-    )
+    adapter = LocalOpengrepAdapter(ruleset_path=DEFAULT_RULESET, runner=recorded_runner)
+    positive = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js"))
 
     assert "--dataflow-traces" in seen_argv
+    assert "--taint-intrafile" in seen_argv
+    assert "--oss-only" not in seen_argv
     assert "--json" in seen_argv
     assert not any(arg.startswith("--json-output") for arg in seen_argv)
     data = positive["data"]
@@ -282,42 +269,36 @@ def test_recorded_positive_output_keeps_traces_through_sink_extraction() -> None
         sink_location = item["dataflow_trace"]["taint_sink"][1][0]
         assert sink_location["path"] == "positive/worker.js"
 
-    extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
+    extraction = extract_sink_candidates(_fixture_request(), opengrep_payload=positive)
     assert len(extraction.sink_candidates) == 3
     assert all(sc.has_static_taint_flow for sc in extraction.sink_candidates)
     assert all(sc.dataflow_steps for sc in extraction.sink_candidates)
     assert all(sc.confidence == ConfidenceLevel.HIGH for sc in extraction.sink_candidates)
 
 
-@pytest.mark.semgrep_cli
-@SEMGREP_REQUIRED
+@pytest.mark.opengrep_cli
+@OPENGREP_REQUIRED
 def test_primary_ruleset_positive_and_negative_controls() -> None:
     ruleset = _configured_ruleset()
-    adapter = LocalSemgrepAdapter(ruleset_path=ruleset)
-    positive = asyncio.run(
-        adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js")
-    )
-    negative = asyncio.run(
-        adapter.analyze(str(RULESET_FIXTURE_ROOT), "negative/safe_worker.js")
-    )
+    adapter = LocalOpengrepAdapter(ruleset_path=ruleset)
+    positive = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "positive/worker.js"))
+    negative = asyncio.run(adapter.analyze(str(RULESET_FIXTURE_ROOT), "negative/safe_worker.js"))
 
     positive_data = positive["data"]
     detected = {item["rule_id"] for item in positive_data["findings"]}
     assert detected >= EXPECTED_RULE_IDS
     assert positive_data["files_scanned"] == 1
     assert positive_data["scanned_files"] == ["positive/worker.js"]
-    # Dataflow traces are optional (Semgrep 1.183 omits them); sink lines are required.
     _assert_expected_sink_lines(positive_data["findings"])
     assert positive_data["ruleset_sha256"] == compute_ruleset_sha256(ruleset)
     assert positive_data["execution_ref"].startswith("EXEC-")
 
-    sink_extraction = extract_sink_candidates(_fixture_request(), semgrep_payload=positive)
+    sink_extraction = extract_sink_candidates(_fixture_request(), opengrep_payload=positive)
     assert len(sink_extraction.sink_candidates) == 3
     assert sorted(sc.start_line for sc in sink_extraction.sink_candidates) == sorted(
         EXPECTED_SINK_LINES.values()
     )
     for sc in sink_extraction.sink_candidates:
-        # A taint flow is only claimed when Semgrep supplied a trace with steps.
         assert sc.has_static_taint_flow == bool(sc.dataflow_steps)
 
     negative_data = negative["data"]
@@ -326,9 +307,9 @@ def test_primary_ruleset_positive_and_negative_controls() -> None:
     assert negative_data["findings"] == []
 
 
-@pytest.mark.semgrep_cli
-@SEMGREP_REQUIRED
-def test_real_semgrep_scans_nested_git_source_root(tmp_path: Path) -> None:
+@pytest.mark.opengrep_cli
+@OPENGREP_REQUIRED
+def test_real_opengrep_scans_nested_git_source_root(tmp_path: Path) -> None:
     ruleset = _configured_ruleset()
     repo = tmp_path / "repo"
     source_root = repo / "nested" / "approved"
@@ -338,11 +319,9 @@ def test_real_semgrep_scans_nested_git_source_root(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True, timeout=10)
-    subprocess.run(
-        ["git", "add", "nested/approved/worker.js"], cwd=repo, check=True, timeout=10
-    )
+    subprocess.run(["git", "add", "nested/approved/worker.js"], cwd=repo, check=True, timeout=10)
 
-    result = asyncio.run(LocalSemgrepAdapter(ruleset_path=ruleset).analyze(str(source_root)))
+    result = asyncio.run(LocalOpengrepAdapter(ruleset_path=ruleset).analyze(str(source_root)))
     data = result["data"]
     assert data["files_scanned"] == 1
     assert data["scanned_files"] == ["worker.js"]
@@ -350,16 +329,16 @@ def test_real_semgrep_scans_nested_git_source_root(tmp_path: Path) -> None:
     assert all(not item["rule_id"].startswith("tests.") for item in data["findings"])
 
 
-@pytest.mark.semgrep_cli
-@SEMGREP_REQUIRED
+@pytest.mark.opengrep_cli
+@OPENGREP_REQUIRED
 def test_optional_community_rules_are_untrusted_audit_only() -> None:
-    configured = os.getenv("WEBSEC_SEMGREP_VENDOR_RULESET", "").strip()
+    configured = os.getenv("WEBSEC_OPENGREP_VENDOR_RULESET", "").strip()
     vendor = Path(configured) if configured else DEFAULT_VENDOR_RULESET
     if not vendor.exists():
         pytest.skip("community rule directory is not configured")
     approved = Path(validate_offline_ruleset_path(vendor.resolve()))
     assert compute_ruleset_sha256(approved)
-    adapter = LocalSemgrepAdapter(ruleset_path=approved)
+    adapter = LocalOpengrepAdapter(ruleset_path=approved)
     summaries = []
     for case in TARGET_CASES:
         result = asyncio.run(adapter.analyze(str(case.source_root.resolve())))
@@ -374,7 +353,7 @@ def test_optional_community_rules_are_untrusted_audit_only() -> None:
     assert all(item["files_scanned"] > 0 for item in summaries)
 
 
-def test_semgrep_cli_prerequisite_message_is_actionable() -> None:
-    executable = os.getenv("WEBSEC_SEMGREP_PATH", "")
+def test_opengrep_cli_prerequisite_message_is_actionable() -> None:
+    executable = os.getenv("WEBSEC_OPENGREP_PATH", "")
     if executable:
         assert Path(executable).is_file() or shutil.which(executable)

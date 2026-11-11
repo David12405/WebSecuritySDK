@@ -71,11 +71,11 @@ from websecuritycheck.domain.models import (
 from .fixtures import (
     FIXED_TIME,
     make_evidence_record,
+    make_opengrep_envelope,
+    make_opengrep_finding,
     make_route_binding_artifact,
-    make_semgrep_envelope,
-    make_semgrep_finding,
     make_shop_analysis_request_with_scope,
-    make_taint_semgrep_finding,
+    make_taint_opengrep_finding,
     make_technology_record,
     make_test_trust_policy,
 )
@@ -113,8 +113,8 @@ def test_verified_input_sink_requires_full_trust_chain():
     ruleset_sha = "c" * 64
     rev = "git-rev-1234"
 
-    # 1. Semgrep finding with taint trace matching ep.path
-    finding = make_taint_semgrep_finding(
+    # 1. Opengrep finding with taint trace matching ep.path
+    finding = make_taint_opengrep_finding(
         rule_id=rule_id,
         file="app/views.py",
         start_line=25,
@@ -123,7 +123,7 @@ def test_verified_input_sink_requires_full_trust_chain():
         source_snippet="request.args.get('sort_by')",
         sink_snippet="cursor.execute(sql)",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
     assert len(sink_res.sink_candidates) == 1
 
@@ -203,13 +203,13 @@ def test_no_trusted_taint_never_verified():
     """Test that pattern-only or untrusted-taint sinks never yield INPUT_SINK VERIFIED."""
     req = _make_correlation_request(source_repo_path="C:/repo")
     ep = req.target_model.endpoints[0]
-    finding = make_semgrep_finding(
+    finding = make_opengrep_finding(
         rule_id="python.sqlalchemy.security.audit.sqli.raw-sql",
         file="app/views.py",
         start_line=25,
         snippet="cursor.execute(sql)",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     rb_evd, _rb_man, rb_ref = make_route_binding_artifact(
@@ -248,8 +248,8 @@ def test_same_application_inputs_and_sinks_not_paired():
     """Inputs and sinks belonging to the same application are never paired without binding."""
     req = _make_correlation_request(source_repo_path="C:/repo")
     ep = req.target_model.endpoints[0]
-    finding = make_semgrep_finding(file="app/views.py", start_line=10)
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    finding = make_opengrep_finding(file="app/views.py", start_line=10)
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     inp = InputCandidate(
@@ -365,8 +365,8 @@ def test_same_subtype_sink_and_cve_not_paired_without_registry():
     """A SQL sink and a SQLi CVE are not paired when Approved Vulnerable API Registry is empty."""
     req = _make_correlation_request()
     cve_res = extract_cve_candidates(req)
-    finding = make_semgrep_finding()
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    finding = make_opengrep_finding()
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     result = correlate_evidence(
@@ -384,11 +384,11 @@ def test_non_injection_sinks_and_cves_excluded():
     """Non-injection sinks (HTML_OUTPUT, PATH_ACCESS, excluded CWEs) are excluded fail-closed."""
     req = _make_correlation_request()
     # HTML_OUTPUT sink (XSS)
-    finding = make_semgrep_finding(
+    finding = make_opengrep_finding(
         rule_id="javascript.browser.security.xss.dangerouslysetinnerhtml",
         cwe="CWE-79: Cross-site Scripting",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     result = correlate_evidence(req, sink_result=sink_res)
@@ -444,7 +444,7 @@ def test_envelope_compatible_with_validate_module2_handoff():
     req = _make_correlation_request()
     inp_res = extract_input_candidates(req)
     cve_res = extract_cve_candidates(req)
-    env = make_semgrep_envelope([], path="C:/repo")
+    env = make_opengrep_envelope([], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     cor_res = correlate_evidence(
@@ -643,7 +643,7 @@ def test_binding_revision_mismatch_with_sink_unresolved():
     rule_id = "python.sqlalchemy.security.audit.sqli.raw-sql"
     ruleset_sha = "d" * 64
 
-    finding = make_taint_semgrep_finding(
+    finding = make_taint_opengrep_finding(
         rule_id=rule_id,
         file="app/views.py",
         start_line=25,
@@ -651,7 +651,7 @@ def test_binding_revision_mismatch_with_sink_unresolved():
         source_line=12,
         source_snippet="request.args.get('sort')",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     evd = sink_res.analysis_evidence_records[0].model_copy(
@@ -730,11 +730,11 @@ def test_default_policy_rejects_all_bindings():
 def test_manifest_cwe_alone_does_not_verify_rule_provenance():
     """A sink finding with valid CWE in manifest but unapproved rule remains UNVERIFIED."""
     req = _make_correlation_request()
-    finding = make_semgrep_finding(
+    finding = make_opengrep_finding(
         rule_id="custom.unapproved.rule",
         cwe="CWE-89: SQL Injection",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     result = correlate_evidence(req, sink_result=sink_res)
@@ -745,8 +745,8 @@ def test_manifest_cwe_alone_does_not_verify_rule_provenance():
 def test_local_approved_label_not_trusted():
     """Offline findings where ruleset='local-approved' is assigned by default are UNVERIFIED."""
     req = _make_correlation_request()
-    finding = make_semgrep_finding()
-    env = make_semgrep_envelope([finding], path="C:/repo", ruleset="local-approved")
+    finding = make_opengrep_finding()
+    env = make_opengrep_envelope([finding], path="C:/repo", ruleset="local-approved")
     sink_res = extract_sink_candidates(req, env)
 
     result = correlate_evidence(req, sink_result=sink_res)
@@ -756,8 +756,8 @@ def test_local_approved_label_not_trusted():
 def test_ruleset_digest_mismatch_conflict():
     """If evidence declares ruleset_sha256 not matching policy, it is UNVERIFIED/CONFLICT."""
     req = _make_correlation_request()
-    finding = make_semgrep_finding()
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    finding = make_opengrep_finding()
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     # Provide ruleset_sha256 not in policy
@@ -783,8 +783,8 @@ def test_search_mode_rule_with_dataflow_trace_conflict():
     rule_id = "test.search.rule"
     ruleset_sha = "e" * 64
 
-    finding = make_taint_semgrep_finding(rule_id=rule_id)
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    finding = make_taint_opengrep_finding(rule_id=rule_id)
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     evd = sink_res.analysis_evidence_records[0].model_copy(
@@ -863,7 +863,7 @@ def test_approved_registry_yields_partial_sink_cve_and_chain():
     ruleset_sha = "7" * 64
     rev = "rev-999"
 
-    finding = make_taint_semgrep_finding(
+    finding = make_taint_opengrep_finding(
         rule_id=rule_id,
         file="app/views.py",
         start_line=25,
@@ -871,7 +871,7 @@ def test_approved_registry_yields_partial_sink_cve_and_chain():
         source_line=12,
         source_snippet="request.args.get('sort_by')",
     )
-    env = make_semgrep_envelope([finding], path="C:/repo")
+    env = make_opengrep_envelope([finding], path="C:/repo")
     sink_res = extract_sink_candidates(req, env)
 
     evd = sink_res.analysis_evidence_records[0].model_copy(
@@ -1054,3 +1054,45 @@ def test_trusted_classification_accessor_read_only_and_behavior_unchanged():
 
     # Non-existent CVE returns None
     assert policy.trusted_classification("CVE-1999-9999") is None
+
+
+def test_nested_json_and_route_path_accessors_resolved():
+    """parse_taint_source_accessor resolves nested JSON body keys and route path params."""
+    acc_dotted = parse_taint_source_accessor("body.filters.category")
+    assert acc_dotted.resolution == AccessorResolution.RESOLVED
+    assert acc_dotted.parameter_name == "filters.category"
+    assert InputLocation.JSON_BODY in acc_dotted.locations
+
+    acc_bracket = parse_taint_source_accessor("body['filters']['category']")
+    assert acc_bracket.resolution == AccessorResolution.RESOLVED
+    assert acc_bracket.parameter_name == "filters.category"
+    assert InputLocation.JSON_BODY in acc_bracket.locations
+
+    acc_express = parse_taint_source_accessor("req.body.filters.category")
+    assert acc_express.resolution == AccessorResolution.RESOLVED
+    assert acc_express.parameter_name == "filters.category"
+    assert InputLocation.JSON_BODY in acc_express.locations
+
+    acc_flask = parse_taint_source_accessor('request.get_json()["filters"]["category"]')
+    assert acc_flask.resolution == AccessorResolution.RESOLVED
+    assert acc_flask.parameter_name == "filters.category"
+    assert InputLocation.JSON_BODY in acc_flask.locations
+
+    acc_path = parse_taint_source_accessor("route.params.id")
+    assert acc_path.resolution == AccessorResolution.RESOLVED
+    assert acc_path.parameter_name == "id"
+    assert InputLocation.PATH in acc_path.locations
+
+
+def test_reviewed_cloudflare_ruleset_entry_syncs_cwe94_and_cwe95():
+    """Code injection spec accepts both CWE-94 and CWE-95 in reviewed policy."""
+    from websecuritycheck.analysis.correlation import REVIEWED_CLOUDFLARE_RULESET_ENTRY
+
+    code_inj = next(
+        r
+        for r in REVIEWED_CLOUDFLARE_RULESET_ENTRY.rules
+        if r.rule_id == "cloudflare-workers.tainted-code-injection"
+    )
+    assert CweId("CWE-94") in code_inj.cwe_ids
+    assert CweId("CWE-95") in code_inj.cwe_ids
+

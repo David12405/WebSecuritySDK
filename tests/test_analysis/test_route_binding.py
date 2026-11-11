@@ -13,6 +13,7 @@ from websecuritycheck.analysis.correlation import (
     RouteBindingArtifactRef,
     verify_route_binding_artifact,
 )
+from websecuritycheck.analysis.opengrep_adapter import resolve_source_snapshot
 from websecuritycheck.analysis.route_binding import (
     METHOD_CLOUDFLARE_WORKER,
     METHOD_DIGEST_CLOUDFLARE_WORKER,
@@ -25,7 +26,6 @@ from websecuritycheck.analysis.route_binding import (
     _extract_python_routes,
     extract_route_bindings,
 )
-from websecuritycheck.analysis.semgrep_adapter import resolve_source_snapshot
 from websecuritycheck.domain import TestingMode
 
 CLOUDFLARE_TARGETS_ROOT = (

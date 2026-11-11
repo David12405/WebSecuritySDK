@@ -1,5 +1,5 @@
 """Deterministic source-analysis tools."""
 
-from . import semgrep, source
+from . import opengrep, source
 
-__all__ = ["semgrep", "source"]
+__all__ = ["opengrep", "source"]
