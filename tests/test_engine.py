@@ -326,6 +326,8 @@ def test_the_shipped_config_passes_the_tool_variables_through() -> None:
     specs = load_server_specs(Path(__file__).resolve().parent.parent / "config" / "servers.yaml")
     ours = next(spec for spec in specs if spec.name == "websec-tools")
     assert "WEBSEC_WHATWEB_PATH" in ours.env
+    assert "WEBSEC_OPENGREP_PATH" in ours.env
+    assert "WEBSEC_OPENGREP_RULESET" in ours.env
 
 
 # --------------------------------------------------------------------------

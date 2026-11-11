@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from .ast_taint import (
+    AST_TAINT_PRODUCER_ID,
+    METHOD_AST_TAINT_V1,
+    METHOD_DIGEST_AST_TAINT_V1,
+    REVIEWED_AST_TAINT_PRODUCER,
+    AstTaintTraceResult,
+    ResolvedTaintInput,
+    extract_handler_code_slice,
+    trace_intraprocedural_sink_taint,
+)
 from .correlation import (
     DEFAULT_CORRELATION_TRUST_POLICY,
     PINNED_CLOUDFLARE_RULESET_SHA256,
@@ -31,6 +41,7 @@ from .correlation import (
     RuleProvenanceStatus,
     TaintSourceAccessor,
     TrustedRouteProducer,
+    TrustedTaintProducer,
     acorrelate_evidence,
     assess_independence,
     build_correlation_envelope,
@@ -39,6 +50,7 @@ from .correlation import (
     correlation_identity_key,
     evaluate_correlation_confidence,
     parse_taint_source_accessor,
+    verify_ast_taint_provenance,
     verify_route_binding_artifact,
 )
 from .cve import (
@@ -70,6 +82,14 @@ from .inputs import (
     input_identity_key,
     normalize_parameter_name,
 )
+from .opengrep_adapter import (
+    AsyncSourceAnalysisPort,
+    LocalOpengrepAdapter,
+    SourceSnapshotInfo,
+    resolve_source_snapshot,
+    validate_offline_ruleset_path,
+    validate_source_analysis_scope,
+)
 from .route_binding import (
     METHOD_CLOUDFLARE_WORKER,
     METHOD_DIGEST_CLOUDFLARE_WORKER,
@@ -82,19 +102,12 @@ from .route_binding import (
     RouteBindingExtractionResult,
     extract_route_bindings,
 )
-from .semgrep_adapter import (
-    AsyncSourceAnalysisPort,
-    LocalSemgrepAdapter,
-    SourceSnapshotInfo,
-    resolve_source_snapshot,
-    validate_offline_ruleset_path,
-    validate_source_analysis_scope,
-)
 from .sinks import (
     SinkCorrelationMetadata,
     SinkExtractionResult,
     aextract_sink_candidates,
     classify_sink_kind,
+    enrich_sinks_with_ast_taint,
     extract_sink_candidates,
     is_non_sink_finding,
     normalize_sink_file_path,
@@ -104,14 +117,18 @@ from .sinks import (
 )
 
 __all__ = [
+    "AST_TAINT_PRODUCER_ID",
     "DEFAULT_CORRELATION_TRUST_POLICY",
+    "METHOD_AST_TAINT_V1",
     "METHOD_CLOUDFLARE_WORKER",
+    "METHOD_DIGEST_AST_TAINT_V1",
     "METHOD_DIGEST_CLOUDFLARE_WORKER",
     "METHOD_DIGEST_JS_ROUTER",
     "METHOD_DIGEST_PY_DECORATOR",
     "METHOD_JS_ROUTER",
     "METHOD_PY_DECORATOR",
     "PINNED_CLOUDFLARE_RULESET_SHA256",
+    "REVIEWED_AST_TAINT_PRODUCER",
     "REVIEWED_CLOUDFLARE_RULESET_ENTRY",
     "REVIEWED_STATIC_ROUTE_PRODUCER",
     "STATIC_ROUTE_PRODUCER_ID",
@@ -119,6 +136,7 @@ __all__ = [
     "ApprovedRuleSpec",
     "ApprovedRulesetEntry",
     "ApprovedVulnerableApiEntry",
+    "AstTaintTraceResult",
     "AsyncSourceAnalysisPort",
     "AsyncVulnerabilityKnowledgePort",
     "CPEProductEntry",
@@ -146,10 +164,11 @@ __all__ = [
     "InjectionSinkScope",
     "InjectionSubtype",
     "InputExtractionResult",
+    "LocalOpengrepAdapter",
     "LocalSeedCVEProvider",
-    "LocalSemgrepAdapter",
     "Module2CorrelationEnvelope",
     "ProductMatchKind",
+    "ResolvedTaintInput",
     "RouteBindingArtifactRef",
     "RouteBindingExtractionResult",
     "RouteHandlerBinding",
@@ -161,6 +180,7 @@ __all__ = [
     "TaintSourceAccessor",
     "TrustedInjectionClassification",
     "TrustedRouteProducer",
+    "TrustedTaintProducer",
     "VersionApplicability",
     "VersionScheme",
     "VulnerabilityKnowledgeProvider",
@@ -173,9 +193,11 @@ __all__ = [
     "classify_sink_kind",
     "correlate_evidence",
     "correlation_identity_key",
+    "enrich_sinks_with_ast_taint",
     "evaluate_correlation_confidence",
     "evaluate_version_applicability",
     "extract_cve_candidates",
+    "extract_handler_code_slice",
     "extract_input_candidates",
     "extract_route_bindings",
     "extract_sink_candidates",
@@ -188,8 +210,10 @@ __all__ = [
     "resolve_source_snapshot",
     "sanitize_sink_text",
     "sink_identity_key",
+    "trace_intraprocedural_sink_taint",
     "validate_offline_ruleset_path",
     "validate_source_analysis_scope",
+    "verify_ast_taint_provenance",
     "verify_route_binding_artifact",
     "verify_sink_evidence_integrity",
 ]

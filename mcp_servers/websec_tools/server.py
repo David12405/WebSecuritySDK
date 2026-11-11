@@ -182,9 +182,9 @@ async def search_source(
 
 
 async def analyze_source(target: str, path: str = ".") -> dict[str, Any]:
-    """Run the server-configured Semgrep ruleset over repository source."""
+    """Run the server-configured Opengrep ruleset over repository source."""
 
-    return await _invoke(analysis_tools.semgrep.analyze_source, target, path)
+    return await _invoke(analysis_tools.opengrep.analyze_source, target, path)
 
 
 TOOLS = (

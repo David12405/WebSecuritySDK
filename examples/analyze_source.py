@@ -13,14 +13,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from mcp_servers.websec_tools.analysis import semgrep, source  # noqa: E402
+from mcp_servers.websec_tools.analysis import opengrep, source  # noqa: E402
 from mcp_servers.websec_tools.errors import ToolError  # noqa: E402
 
 TOOL_ALIASES = {
     "tree": "inspect_source_tree",
     "read": "read_source_file",
     "search": "search_source",
-    "semgrep": "analyze_source",
+    "opengrep": "analyze_source",
 }
 TOOL_NAMES = (
     "inspect_source_tree",
@@ -60,7 +60,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         if not args.query:
             raise ToolError("E_INVALID_ARGUMENT", "--query is required for search_source")
         return await source.search_source(target, args.query, args.path, args.case_sensitive)
-    return await semgrep.analyze_source(target, args.path)
+    return await opengrep.analyze_source(target, args.path)
 
 
 def main(argv: list[str] | None = None) -> int:

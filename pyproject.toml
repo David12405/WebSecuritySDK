@@ -41,7 +41,7 @@ markers = [
     "live_nmap: isolated opt-in Nmap tests against an authorized lab target",
     "live_agent: opt-in tests requiring an Agent model and credentials",
     "live_m1_m2: opt-in WHITEBOX M1 to M2 tests against authorized lab targets",
-    "semgrep_cli: opt-in contracts requiring a local Semgrep executable",
+    "opengrep_cli: opt-in contracts requiring a local Opengrep executable",
 ]
 
 [tool.ruff]

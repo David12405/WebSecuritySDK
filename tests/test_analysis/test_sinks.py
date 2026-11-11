@@ -1,4 +1,4 @@
-"""Unit and integration test suites for Module 2 Semgrep Sink Extraction (M2-T03)."""
+"""Unit and integration test suites for Module 2 Opengrep Sink Extraction (M2-T03)."""
 
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ import pytest
 from mcp_servers.websec_tools.errors import ToolError
 from test_analysis.fixtures import (
     FIXED_TIME,
-    make_semgrep_envelope,
-    make_semgrep_finding,
+    make_opengrep_envelope,
+    make_opengrep_finding,
     make_shop_analysis_request_with_scope,
 )
 from websecuritycheck.analysis.inputs import extract_input_candidates
-from websecuritycheck.analysis.semgrep_adapter import (
-    LocalSemgrepAdapter,
+from websecuritycheck.analysis.opengrep_adapter import (
+    LocalOpengrepAdapter,
     compute_ruleset_sha256,
     validate_offline_ruleset_path,
     validate_source_analysis_scope,
@@ -61,14 +61,14 @@ def tmp_path():
         yield Path(td).resolve()
 
 
-# 1. test_parse_valid_semgrep_envelope_and_raw_cli_json
-def test_parse_valid_semgrep_envelope_and_raw_cli_json():
+# 1. test_parse_valid_opengrep_envelope_and_raw_cli_json
+def test_parse_valid_opengrep_envelope_and_raw_cli_json():
     req = make_shop_analysis_request_with_scope()
 
     # Format 1: Envelope
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(
+            make_opengrep_finding(
                 rule_id="python.django.security.injection.sql-injection",
                 file="app/products.py",
                 start_line=28,
@@ -79,7 +79,7 @@ def test_parse_valid_semgrep_envelope_and_raw_cli_json():
             )
         ]
     )
-    res1 = extract_sink_candidates(req, semgrep_payload=envelope)
+    res1 = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res1.sink_candidates) == 1
     assert len(res1.analysis_evidence_records) == 1
     assert len(res1.artifact_manifests) == 1
@@ -89,9 +89,9 @@ def test_parse_valid_semgrep_envelope_and_raw_cli_json():
     assert sc1.file_path == "app/products.py"
     assert sc1.start_line == 28
 
-    # Format 2: Raw Semgrep CLI JSON
+    # Format 2: Raw Opengrep CLI JSON
     raw_cli = {
-        "version": "1.90.0",
+        "version": "1.6.0",
         "results": [
             {
                 "check_id": "python.flask.security.xss",
@@ -108,7 +108,7 @@ def test_parse_valid_semgrep_envelope_and_raw_cli_json():
         ],
         "errors": [],
     }
-    res2 = extract_sink_candidates(req, semgrep_payload=raw_cli)
+    res2 = extract_sink_candidates(req, opengrep_payload=raw_cli)
     assert len(res2.sink_candidates) == 1
     sc2 = res2.sink_candidates[0]
     assert sc2.sink_kind == SinkKind.HTML_OUTPUT
@@ -116,11 +116,11 @@ def test_parse_valid_semgrep_envelope_and_raw_cli_json():
     assert sc2.start_line == 15
 
 
-# 2. test_empty_semgrep_findings_produces_no_orphan_evidence
-def test_empty_semgrep_findings_produces_no_orphan_evidence():
+# 2. test_empty_opengrep_findings_produces_no_orphan_evidence
+def test_empty_opengrep_findings_produces_no_orphan_evidence():
     req = make_shop_analysis_request_with_scope()
-    envelope = make_semgrep_envelope([])
-    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    envelope = make_opengrep_envelope([])
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
     assert res.sink_candidates == []
     assert res.analysis_evidence_records == []
     assert res.artifact_manifests == []
@@ -129,14 +129,14 @@ def test_empty_semgrep_findings_produces_no_orphan_evidence():
     assert res.warnings == []
 
     raw_cli = {"results": [], "errors": []}
-    res_cli = extract_sink_candidates(req, semgrep_payload=raw_cli)
+    res_cli = extract_sink_candidates(req, opengrep_payload=raw_cli)
     assert res_cli.sink_candidates == []
     assert res_cli.analysis_evidence_records == []
 
 
-def test_semgrep_scan_coverage_and_provenance_reach_evidence():
+def test_opengrep_scan_coverage_and_provenance_reach_evidence():
     request = make_shop_analysis_request_with_scope()
-    payload = make_semgrep_envelope([make_semgrep_finding()])
+    payload = make_opengrep_envelope([make_opengrep_finding()])
     payload["data"].update(
         {
             "scanned_files": ["app/routes.py"],
@@ -145,7 +145,7 @@ def test_semgrep_scan_coverage_and_provenance_reach_evidence():
             "execution_ref": "EXEC-123",
         }
     )
-    result = extract_sink_candidates(request, semgrep_payload=payload)
+    result = extract_sink_candidates(request, opengrep_payload=payload)
     assert result.scanned_files == ["app/routes.py"]
     assert result.ruleset_sha256 == "a" * 64
     assert result.source_revision == "revision-1"
@@ -154,18 +154,18 @@ def test_semgrep_scan_coverage_and_provenance_reach_evidence():
     assert result.analysis_evidence_records[0].provenance["ruleset_sha256"] == "a" * 64
 
 
-def test_zero_file_semgrep_scan_is_explicit_limitation():
+def test_zero_file_opengrep_scan_is_explicit_limitation():
     request = make_shop_analysis_request_with_scope()
-    payload = make_semgrep_envelope([])
+    payload = make_opengrep_envelope([])
     payload["data"]["files_scanned"] = 0
     payload["data"]["scanned_files"] = []
-    result = extract_sink_candidates(request, semgrep_payload=payload)
-    assert "SEMGREP_SCAN_EMPTY" in result.limitations
+    result = extract_sink_candidates(request, opengrep_payload=payload)
+    assert "OPENGREP_SCAN_EMPTY" in result.limitations
 
 
-# 3. test_semgrep_execution_failure_and_malformed_json_fail_closed
+# 3. test_opengrep_execution_failure_and_malformed_json_fail_closed
 @async_test
-async def test_semgrep_execution_failure_and_malformed_json_fail_closed(tmp_path: Path):
+async def test_opengrep_execution_failure_and_malformed_json_fail_closed(tmp_path: Path):
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     req = make_shop_analysis_request_with_scope(
@@ -175,7 +175,7 @@ async def test_semgrep_execution_failure_and_malformed_json_fail_closed(tmp_path
 
     class FailingPort:
         async def analyze(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
-            raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep binary missing")
+            raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep binary missing")
 
     res = await aextract_sink_candidates(req, analyzer=FailingPort())
     assert res.sink_candidates == []
@@ -184,16 +184,16 @@ async def test_semgrep_execution_failure_and_malformed_json_fail_closed(tmp_path
 
     class TimeoutPort:
         async def analyze(self, target_root: str, subpath: str = ".") -> dict[str, Any]:
-            raise ToolError("E_TIMEOUT", "Semgrep timed out after 120s")
+            raise ToolError("E_TIMEOUT", "Opengrep timed out after 120s")
 
     res_timeout = await aextract_sink_candidates(req, analyzer=TimeoutPort())
     assert any("E_TIMEOUT" in lim for lim in res_timeout.limitations)
 
     # Malformed JSON payload
     malformed = {"unexpected": 123}
-    res_malformed = extract_sink_candidates(req, semgrep_payload=malformed)
+    res_malformed = extract_sink_candidates(req, opengrep_payload=malformed)
     assert res_malformed.sink_candidates == []
-    assert any("Malformed Semgrep output payload" in lim for lim in res_malformed.limitations)
+    assert any("Malformed Opengrep output payload" in lim for lim in res_malformed.limitations)
 
 
 # 4. test_authorization_and_scope_guard_blocks_unapproved_or_bypass_attempts
@@ -202,24 +202,24 @@ def test_authorization_and_scope_guard_blocks_unapproved_or_bypass_attempts():
     req_bb = make_shop_analysis_request_with_scope()
     req_bb.target_model.scope_rules.testing_mode = TestingMode.BLACKBOX  # type: ignore[union-attr]
     req_bb.source_repo_path = None
-    res_bb = extract_sink_candidates(req_bb, semgrep_payload=make_semgrep_envelope())
+    res_bb = extract_sink_candidates(req_bb, opengrep_payload=make_opengrep_envelope())
     assert any("BLACKBOX" in lim for lim in res_bb.limitations)
 
     # 4b: scope_rules missing
     req_no_rules = make_shop_analysis_request_with_scope()
     req_no_rules.target_model.scope_rules = None
-    res_no_rules = extract_sink_candidates(req_no_rules, semgrep_payload=make_semgrep_envelope())
+    res_no_rules = extract_sink_candidates(req_no_rules, opengrep_payload=make_opengrep_envelope())
     assert any("scope_rules is missing" in lim for lim in res_no_rules.limitations)
 
     # 4c: source_repo_path None
     req_no_path = make_shop_analysis_request_with_scope(source_repo_path=None)
-    res_no_path = extract_sink_candidates(req_no_path, semgrep_payload=make_semgrep_envelope())
+    res_no_path = extract_sink_candidates(req_no_path, opengrep_payload=make_opengrep_envelope())
     assert any("No source_repo_path provided" in lim for lim in res_no_path.limitations)
 
     # 4d: source_repository_ref None
     req_no_ref = make_shop_analysis_request_with_scope()
     req_no_ref.target_model.scope_rules.source_repository_ref = None  # type: ignore[union-attr]
-    res_no_ref = extract_sink_candidates(req_no_ref, semgrep_payload=make_semgrep_envelope())
+    res_no_ref = extract_sink_candidates(req_no_ref, opengrep_payload=make_opengrep_envelope())
     assert any("source_repository_ref is not configured" in lim for lim in res_no_ref.limitations)
 
     # 4e: Path outside approved scope
@@ -227,7 +227,7 @@ def test_authorization_and_scope_guard_blocks_unapproved_or_bypass_attempts():
         source_repo_path="/unapproved/other/repo",
         source_repository_ref="/approved/shop",
     )
-    res_outside = extract_sink_candidates(req_outside, semgrep_payload=make_semgrep_envelope())
+    res_outside = extract_sink_candidates(req_outside, opengrep_payload=make_opengrep_envelope())
     assert any("outside approved source_repository_ref" in lim for lim in res_outside.limitations)
 
     # 4f: Windows drive mismatch and path traversal
@@ -260,8 +260,8 @@ def test_authorization_and_scope_guard_blocks_unapproved_or_bypass_attempts():
     req_ok = make_shop_analysis_request_with_scope(
         source_repo_path="/repo/shop", source_repository_ref="/repo/shop"
     )
-    payload_bad_file = make_semgrep_envelope([make_semgrep_finding(file="/etc/passwd")])
-    res_bad_file = extract_sink_candidates(req_ok, semgrep_payload=payload_bad_file)
+    payload_bad_file = make_opengrep_envelope([make_opengrep_finding(file="/etc/passwd")])
+    res_bad_file = extract_sink_candidates(req_ok, opengrep_payload=payload_bad_file)
     assert res_bad_file.sink_candidates == []
     assert any("lying outside approved repository" in w for w in res_bad_file.warnings)
 
@@ -270,18 +270,18 @@ def test_authorization_and_scope_guard_blocks_unapproved_or_bypass_attempts():
 @async_test
 async def test_async_execution_interface_and_running_event_loop_safety():
     req = make_shop_analysis_request_with_scope()
-    envelope = make_semgrep_envelope([make_semgrep_finding()])
+    envelope = make_opengrep_envelope([make_opengrep_finding()])
 
     # aextract with pre-captured payload
-    res = await aextract_sink_candidates(req, semgrep_payload=envelope)
+    res = await aextract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res.sink_candidates) == 1
 
     # extract_sink_candidates (sync) running cleanly inside running event loop
-    res_sync = extract_sink_candidates(req, semgrep_payload=envelope)
+    res_sync = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res_sync.sink_candidates) == 1
 
     # Calling adapter.run_sync() inside running loop raises RuntimeError
-    adapter = LocalSemgrepAdapter(ruleset_path="E:/Academic/Intern/WebSecuritySDK")
+    adapter = LocalOpengrepAdapter(ruleset_path="E:/Academic/Intern/WebSecuritySDK")
     with pytest.raises(RuntimeError, match="cannot be called inside a running asyncio event loop"):
         adapter.run_sync("/repo/shop")
 
@@ -290,20 +290,20 @@ async def test_async_execution_interface_and_running_event_loop_safety():
 def test_strict_offline_ruleset_and_layer6_startup_env_validation(tmp_path: Path):
     # Missing ruleset -> ToolError
     with pytest.raises(
-        ToolError, match="Strict offline Semgrep policy requires an explicit local ruleset"
+        ToolError, match="Strict offline Opengrep policy requires an explicit local ruleset"
     ):
         validate_offline_ruleset_path("")
 
     # Remote registry ruleset -> strictly prohibited
     with pytest.raises(
-        ToolError, match=r"Remote Semgrep registry ruleset .* is strictly prohibited"
+        ToolError, match=r"Remote Opengrep registry ruleset .* is strictly prohibited"
     ):
         validate_offline_ruleset_path("p/default")
 
     with pytest.raises(
-        ToolError, match=r"Remote Semgrep registry ruleset .* is strictly prohibited"
+        ToolError, match=r"Remote Opengrep registry ruleset .* is strictly prohibited"
     ):
-        validate_offline_ruleset_path("https://semgrep.dev/p/default")
+        validate_offline_ruleset_path("https://opengrep.dev/p/default")
 
     # Invalid extension
     bad_txt = tmp_path / "rules.txt"
@@ -326,6 +326,38 @@ def test_strict_offline_ruleset_and_layer6_startup_env_validation(tmp_path: Path
     assert len(first_digest) == 64
     valid_yaml.write_text("rules:\n  - id: changed\n", encoding="utf-8")
     assert compute_ruleset_sha256(valid_yaml) != first_digest
+
+
+def test_empty_env_vars_do_not_break_explicit_ruleset_or_hide_invalid_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    valid_yaml = tmp_path / "explicit.yaml"
+    valid_yaml.write_text("rules: []", encoding="utf-8")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    async def fake_runner(argv: list[str], cwd: Path, output_path: Path, stderr_path: Path) -> int:
+        output_path.write_text(
+            json.dumps({"results": [], "errors": [], "paths": {"scanned": []}}), encoding="utf-8"
+        )
+        return 0
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "")
+    monkeypatch.setenv("WEBSEC_OPENGREP_RULESET", "")
+
+    # Explicit ruleset_path still succeeds when env vars are blank strings (e.g. from .env).
+    adapter = LocalOpengrepAdapter(ruleset_path=valid_yaml, runner=fake_runner)
+    res = asyncio.run(adapter.analyze(str(repo_dir)))
+    assert res["data"]["ruleset_ref"] == "explicit.yaml"
+
+    # Without explicit ruleset_path, blank env still enforces strict offline policy.
+    with pytest.raises(ToolError, match="Strict offline Opengrep policy requires"):
+        asyncio.run(LocalOpengrepAdapter(runner=fake_runner).analyze(str(repo_dir)))
+
+    # Whitespace-only WEBSEC_OPENGREP_PATH is still rejected as invalid.
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "   ")
+    with pytest.raises(ToolError, match="WEBSEC_OPENGREP_PATH is invalid"):
+        asyncio.run(adapter.analyze(str(repo_dir)))
 
 
 # 7. test_concurrent_adapter_executions_with_different_local_rulesets_and_provenance
@@ -364,8 +396,8 @@ async def test_concurrent_adapter_executions_with_different_local_rulesets_and_p
         )
         return 0
 
-    adapter_a = LocalSemgrepAdapter(ruleset_path=rules_alpha, runner=fake_runner_alpha)
-    adapter_b = LocalSemgrepAdapter(ruleset_path=rules_beta, runner=fake_runner_beta)
+    adapter_a = LocalOpengrepAdapter(ruleset_path=rules_alpha, runner=fake_runner_alpha)
+    adapter_b = LocalOpengrepAdapter(ruleset_path=rules_beta, runner=fake_runner_beta)
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir(exist_ok=True)
@@ -439,16 +471,16 @@ def test_ambiguous_sink_classification_precedence_and_non_sink_exclusion():
 # 10. test_unverified_sink_without_taint_flow_caps_confidence_and_steps
 def test_unverified_sink_without_taint_flow_caps_confidence_and_steps():
     req = make_shop_analysis_request_with_scope()
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(
+            make_opengrep_finding(
                 confidence="HIGH",
                 severity="ERROR",
                 dataflow_trace=None,
             )
         ]
     )
-    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res.sink_candidates) == 1
     sc = res.sink_candidates[0]
     assert sc.has_static_taint_flow is False
@@ -492,9 +524,9 @@ def test_verified_static_taint_flow_extraction_and_metadata():
             }
         ],
     }
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(
+            make_opengrep_finding(
                 file="app/routes.py",
                 start_line=15,
                 confidence="HIGH",
@@ -502,7 +534,7 @@ def test_verified_static_taint_flow_extraction_and_metadata():
             )
         ]
     )
-    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res.sink_candidates) == 1
     sc = res.sink_candidates[0]
     assert sc.has_static_taint_flow is True
@@ -513,7 +545,7 @@ def test_verified_static_taint_flow_extraction_and_metadata():
     assert meta.taint_source_line == 10
 
 
-def test_verified_static_taint_flow_extraction_with_semgrep_cli_atd_format():
+def test_verified_static_taint_flow_extraction_with_opengrep_cli_atd_format():
     req = make_shop_analysis_request_with_scope()
     trace = {
         "intermediate_vars": [
@@ -552,9 +584,9 @@ def test_verified_static_taint_flow_extraction_with_semgrep_cli_atd_format():
             ],
         ],
     }
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(
+            make_opengrep_finding(
                 file="app/routes.py",
                 start_line=15,
                 confidence="HIGH",
@@ -562,7 +594,7 @@ def test_verified_static_taint_flow_extraction_with_semgrep_cli_atd_format():
             )
         ]
     )
-    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(res.sink_candidates) == 1
     sc = res.sink_candidates[0]
     assert sc.has_static_taint_flow is True
@@ -576,7 +608,7 @@ def test_verified_static_taint_flow_extraction_with_semgrep_cli_atd_format():
 # 12. test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_metadata
 def test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_metadata():
     req = make_shop_analysis_request_with_scope()
-    f1 = make_semgrep_finding(
+    f1 = make_opengrep_finding(
         rule_id="rule.pattern.sqli",
         file="app/db.py",
         start_line=30,
@@ -604,7 +636,7 @@ def test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_meta
             }
         ],
     }
-    f2 = make_semgrep_finding(
+    f2 = make_opengrep_finding(
         rule_id="rule.taint.sqli",
         file="app/db.py",
         start_line=30,
@@ -614,7 +646,7 @@ def test_deduplication_merges_exact_sink_anchor_and_preserves_all_taint_and_meta
         snippet="cursor.execute(sql)",
         dataflow_trace=trace,
     )
-    res = extract_sink_candidates(req, semgrep_payload=make_semgrep_envelope([f1, f2]))
+    res = extract_sink_candidates(req, opengrep_payload=make_opengrep_envelope([f1, f2]))
     assert len(res.sink_candidates) == 1
     sc = res.sink_candidates[0]
     assert sc.has_static_taint_flow is True
@@ -628,14 +660,14 @@ def test_deduplication_preserves_nested_sinks_and_separate_same_line_calls():
     req = make_shop_analysis_request_with_scope()
 
     # Separate calls on same line
-    f1 = make_semgrep_finding(
+    f1 = make_opengrep_finding(
         file="app/api.py",
         start_line=42,
         start_column=5,
         end_column=25,
         snippet="cursor.execute(q1)",
     )
-    f2 = make_semgrep_finding(
+    f2 = make_opengrep_finding(
         file="app/api.py",
         start_line=42,
         start_column=30,
@@ -644,14 +676,14 @@ def test_deduplication_preserves_nested_sinks_and_separate_same_line_calls():
     )
 
     # Nested calls on same line
-    f3_outer = make_semgrep_finding(
+    f3_outer = make_opengrep_finding(
         file="app/nested.py",
         start_line=10,
         start_column=5,
         end_column=60,
         snippet="cursor.execute(build_query(x))",
     )
-    f3_inner = make_semgrep_finding(
+    f3_inner = make_opengrep_finding(
         file="app/nested.py",
         start_line=10,
         start_column=20,
@@ -660,7 +692,7 @@ def test_deduplication_preserves_nested_sinks_and_separate_same_line_calls():
     )
 
     res = extract_sink_candidates(
-        req, semgrep_payload=make_semgrep_envelope([f1, f2, f3_outer, f3_inner])
+        req, opengrep_payload=make_opengrep_envelope([f1, f2, f3_outer, f3_inner])
     )
     # Separate calls must NOT be merged; nested calls must NOT be merged
     assert len(res.sink_candidates) == 4
@@ -670,7 +702,7 @@ def test_deduplication_preserves_nested_sinks_and_separate_same_line_calls():
 def test_deduplication_keeps_missing_column_findings_from_different_rules_separate():
     req = make_shop_analysis_request_with_scope()
 
-    f_rule1 = make_semgrep_finding(
+    f_rule1 = make_opengrep_finding(
         rule_id="sqli-rule-1",
         file="app/views.py",
         start_line=50,
@@ -678,7 +710,7 @@ def test_deduplication_keeps_missing_column_findings_from_different_rules_separa
         end_column=None,
         snippet="query()",
     )
-    f_rule2 = make_semgrep_finding(
+    f_rule2 = make_opengrep_finding(
         rule_id="sqli-rule-2",
         file="app/views.py",
         start_line=50,
@@ -686,7 +718,7 @@ def test_deduplication_keeps_missing_column_findings_from_different_rules_separa
         end_column=None,
         snippet="query()",
     )
-    f_rule1_dup = make_semgrep_finding(
+    f_rule1_dup = make_opengrep_finding(
         rule_id="sqli-rule-1",
         file="app/views.py",
         start_line=50,
@@ -696,7 +728,7 @@ def test_deduplication_keeps_missing_column_findings_from_different_rules_separa
     )
 
     res = extract_sink_candidates(
-        req, semgrep_payload=make_semgrep_envelope([f_rule1, f_rule2, f_rule1_dup])
+        req, opengrep_payload=make_opengrep_envelope([f_rule1, f_rule2, f_rule1_dup])
     )
     # f_rule1 and f_rule1_dup are merged; f_rule2 is kept distinct
     assert len(res.sink_candidates) == 2
@@ -705,13 +737,13 @@ def test_deduplication_keeps_missing_column_findings_from_different_rules_separa
 # 15. test_evidence_integrity_canonical_payload_and_manifest_reverification
 def test_evidence_integrity_canonical_payload_and_manifest_reverification():
     req = make_shop_analysis_request_with_scope()
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(rule_id="sqli.a", file="app/a.py", start_line=1),
-            make_semgrep_finding(rule_id="sqli.b", file="app/b.py", start_line=2),
+            make_opengrep_finding(rule_id="sqli.a", file="app/a.py", start_line=1),
+            make_opengrep_finding(rule_id="sqli.b", file="app/b.py", start_line=2),
         ]
     )
-    res = extract_sink_candidates(req, semgrep_payload=envelope)
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
 
     # Collision-free allocator check
     evd_ids = [r.evidence_id for r in res.analysis_evidence_records]
@@ -739,17 +771,17 @@ def test_unified_sensitive_data_redaction_and_fail_closed_suppression():
     req = make_shop_analysis_request_with_scope()
 
     # Sensitive file (.env.production) -> snippet None
-    f_env = make_semgrep_finding(
+    f_env = make_opengrep_finding(
         file=".env.production", start_line=1, snippet="DATABASE_URL=postgres://user:pass@host/db"
     )
 
     # Regular file with secret assignment and PEM key
-    f_secret = make_semgrep_finding(
+    f_secret = make_opengrep_finding(
         file="app/config.py",
         start_line=20,
         snippet="password = 'super_secret_value_12345'",
     )
-    f_pem = make_semgrep_finding(
+    f_pem = make_opengrep_finding(
         file="app/crypto.py",
         start_line=5,
         snippet="""-----BEGIN RSA PRIVATE KEY-----
@@ -758,7 +790,7 @@ MIIEowIBAAKCAQEA0...
     )
 
     res = extract_sink_candidates(
-        req, semgrep_payload=make_semgrep_envelope([f_env, f_secret, f_pem])
+        req, opengrep_payload=make_opengrep_envelope([f_env, f_secret, f_pem])
     )
     assert len(res.sink_candidates) == 3
 
@@ -781,16 +813,16 @@ MIIEowIBAAKCAQEA0...
 # 17. test_permutation_determinism_across_findings_order
 def test_permutation_determinism_across_findings_order():
     req = make_shop_analysis_request_with_scope()
-    f1 = make_semgrep_finding(rule_id="sqli.z", file="app/z.py", start_line=10)
-    f2 = make_semgrep_finding(rule_id="sqli.a", file="app/a.py", start_line=5)
-    f3 = make_semgrep_finding(rule_id="cmdi.m", file="app/m.py", start_line=20)
-    f4 = make_semgrep_finding(rule_id="xss.b", file="app/b.py", start_line=1)
+    f1 = make_opengrep_finding(rule_id="sqli.z", file="app/z.py", start_line=10)
+    f2 = make_opengrep_finding(rule_id="sqli.a", file="app/a.py", start_line=5)
+    f3 = make_opengrep_finding(rule_id="cmdi.m", file="app/m.py", start_line=20)
+    f4 = make_opengrep_finding(rule_id="xss.b", file="app/b.py", start_line=1)
 
     res1 = extract_sink_candidates(
-        req, semgrep_payload=make_semgrep_envelope([f1, f2, f3, f4], truncated=True)
+        req, opengrep_payload=make_opengrep_envelope([f1, f2, f3, f4], truncated=True)
     )
     res2 = extract_sink_candidates(
-        req, semgrep_payload=make_semgrep_envelope([f4, f3, f2, f1], truncated=True)
+        req, opengrep_payload=make_opengrep_envelope([f4, f3, f2, f1], truncated=True)
     )
 
     assert [s.model_dump() for s in res1.sink_candidates] == [
@@ -833,9 +865,9 @@ def test_end_to_end_compatibility_with_m2_t01_and_m2_t02_handoff():
             }
         ],
     }
-    envelope = make_semgrep_envelope(
+    envelope = make_opengrep_envelope(
         [
-            make_semgrep_finding(
+            make_opengrep_finding(
                 rule_id="python.django.security.injection.sql-injection",
                 file="app/products.py",
                 start_line=28,
@@ -846,7 +878,7 @@ def test_end_to_end_compatibility_with_m2_t01_and_m2_t02_handoff():
             )
         ]
     )
-    sink_res = extract_sink_candidates(req, semgrep_payload=envelope)
+    sink_res = extract_sink_candidates(req, opengrep_payload=envelope)
     assert len(sink_res.sink_candidates) == 1
     sink = sink_res.sink_candidates[0]
     assert sink.has_static_taint_flow is True
@@ -895,3 +927,50 @@ def test_end_to_end_compatibility_with_m2_t01_and_m2_t02_handoff():
     assert len(validated.hypotheses) == 1
     assert len(validated.inputs) == len(inp_res.inputs)
     assert len(validated.sink_candidates) == 1
+
+
+# 19. Strip 'requires login' placeholder and refine whole-body request.json() traces
+def test_requires_login_stripped_and_request_json_trace_refined():
+    req = make_shop_analysis_request_with_scope()
+    trace = {
+        "taint_source": [
+            "CliLoc",
+            [
+                {"path": "worker.js", "start": {"line": 7, "col": 16}},
+                "await request.json()",
+            ],
+        ],
+        "intermediate_vars": [
+            {
+                "location": {"path": "worker.js", "start": {"line": 7, "col": 9}},
+                "content": "body",
+            }
+        ],
+        "taint_sink": [
+            "CliLoc",
+            [
+                {"path": "worker.js", "start": {"line": 8, "col": 24}},
+                "body.unsafeSql",
+            ],
+        ],
+    }
+    envelope = make_opengrep_envelope(
+        [
+            make_opengrep_finding(
+                rule_id="cloudflare-workers.tainted-d1-sql-injection",
+                file="worker.js",
+                start_line=8,
+                snippet="requires login",
+                dataflow_trace=trace,
+            )
+        ]
+    )
+    res = extract_sink_candidates(req, opengrep_payload=envelope)
+    assert len(res.sink_candidates) == 1
+    sc = res.sink_candidates[0]
+    assert sc.snippet is None
+    assert sc.has_static_taint_flow is True
+    meta = res.sink_metadata[sc.sink_id]
+    assert meta.taint_source_snippet == "body.unsafeSql"
+    assert meta.taint_source_line == 7
+

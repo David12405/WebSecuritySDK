@@ -33,6 +33,9 @@ servers:
       WEBSEC_ZAP_API_KEY: "${WEBSEC_ZAP_API_KEY}"
       # Trusted browser proxy configuration; never supplied by Agent actions.
       WEBSEC_ZAP_PROXY_URL: "${WEBSEC_ZAP_PROXY_URL}"
+      # Opengrep static analysis binary and ruleset (empty falls back to L6 defaults).
+      WEBSEC_OPENGREP_PATH: "${WEBSEC_OPENGREP_PATH}"
+      WEBSEC_OPENGREP_RULESET: "${WEBSEC_OPENGREP_RULESET}"
 
   # Partner's server. Fill in once the transport is agreed.
   - name: partner-websec

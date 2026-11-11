@@ -61,9 +61,9 @@ from websecuritycheck.recon.endpoints import (
 from .fixtures import (
     FIXED_TIME,
     make_evidence_record,
+    make_opengrep_envelope,
+    make_opengrep_finding,
     make_scope_rules,
-    make_semgrep_envelope,
-    make_semgrep_finding,
     make_technology_record,
 )
 
@@ -600,7 +600,7 @@ def test_deterministic_ordering_and_deduplication() -> None:
 
 def test_end_to_end_module2_handoff_validation() -> None:
     evd_http = make_evidence_record("EVD-001", artifact_type=ArtifactType.HTTP_RAW_EXCHANGE)
-    evd_semgrep = make_evidence_record(
+    evd_opengrep = make_evidence_record(
         "EVD-002",
         artifact_type=ArtifactType.SOURCE_ARTIFACT,
         artifact_ref="source-file-1",
@@ -675,7 +675,7 @@ def test_end_to_end_module2_handoff_validation() -> None:
     req = _make_request(
         technologies=[tech],
         observations=[obs_ep, obs_tech],
-        evidence_records=[evd_http, evd_semgrep],
+        evidence_records=[evd_http, evd_opengrep],
         endpoints=[ep],
         source_repo_path="/repo/shop",
     )
@@ -684,15 +684,15 @@ def test_end_to_end_module2_handoff_validation() -> None:
     inp_res = extract_input_candidates(req)
     assert len(inp_res.inputs) >= 1
 
-    # 2. Run M2-T03 (sinks) with synthetic semgrep output
-    finding = make_semgrep_finding(
+    # 2. Run M2-T03 (sinks) with synthetic opengrep output
+    finding = make_opengrep_finding(
         rule_id="python.django.security.injection.sql-injection",
         file="app/views.py",
         start_line=10,
         snippet="cursor.execute(query)",
         confidence="HIGH",
     )
-    envelope = make_semgrep_envelope(findings=[finding])
+    envelope = make_opengrep_envelope(findings=[finding])
     sink_res = extract_sink_candidates(req, envelope)
     assert len(sink_res.sink_candidates) >= 1
 

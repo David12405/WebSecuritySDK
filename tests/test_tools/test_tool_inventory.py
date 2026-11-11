@@ -20,7 +20,7 @@ TOOL_COVERAGE = {
     "inspect_source_tree": "source",
     "read_source_file": "source",
     "search_source": "source",
-    "analyze_source": "semgrep",
+    "analyze_source": "opengrep",
 }
 
 
@@ -39,5 +39,5 @@ def test_tool_inventory_has_no_unclassified_entries():
         "openapi",
         "browser",
         "source",
-        "semgrep",
+        "opengrep",
     }

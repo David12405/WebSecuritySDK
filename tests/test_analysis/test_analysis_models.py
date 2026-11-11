@@ -191,7 +191,7 @@ def test_endpoint_and_component_level_cve_hypotheses():
         evidence_id="EVD-003",
         assessment_id="ASM-001",
         artifact_type=ArtifactType.SOURCE_ARTIFACT,
-        artifact_ref="semgrep-rule-auth-bypass",
+        artifact_ref="opengrep-rule-auth-bypass",
         storage_uri="memory://evd-3",
         sha256_hash="2" * 64,
         size_bytes=50,
@@ -253,7 +253,7 @@ def test_endpoint_and_component_level_cve_hypotheses():
         sink_ref="SNK-001",
         sink_relationship=SinkRelationship.STATIC_TAINT_FLOW_FOUND,
         confidence=ConfidenceLevel.HIGH,
-        rationale="Semgrep confirmed static taint from input to raw SQL query",
+        rationale="Opengrep confirmed static taint from input to raw SQL query",
         supporting_evidence_refs=["EVD-001", "EVD-003"],
         validation_proposals=[prop1],
     )
@@ -413,8 +413,8 @@ def test_static_taint_flow_semantics_and_no_sink_endpoint_field():
         )
 
 
-def test_semgrep_evidence_provenance_and_collision_rejection():
-    """Verify Semgrep evidence must be SOURCE_ARTIFACT and must not collide with Module 1."""
+def test_opengrep_evidence_provenance_and_collision_rejection():
+    """Verify Opengrep evidence must be SOURCE_ARTIFACT and must not collide with Module 1."""
     request = _build_base_request()
 
     # Rejection: analysis_evidence_record is not SOURCE_ARTIFACT
@@ -441,7 +441,7 @@ def test_semgrep_evidence_provenance_and_collision_rejection():
         evidence_id="EVD-001",
         assessment_id="ASM-001",
         artifact_type=ArtifactType.SOURCE_ARTIFACT,
-        artifact_ref="colliding-semgrep",
+        artifact_ref="colliding-opengrep",
         storage_uri="memory://evd-1-collide",
         sha256_hash="0" * 64,
         size_bytes=10,

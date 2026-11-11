@@ -1,4 +1,4 @@
-"""Server-controlled, bounded Semgrep integration."""
+"""Server-controlled, bounded Opengrep integration."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from .source import (
     relative_path,
 )
 
-DEFAULT_SEMGREP_PATH = "semgrep"
+DEFAULT_OPENGREP_PATH = "opengrep"
 DEFAULT_RULESET = "p/default"
 GLOBAL_TIMEOUT = 120.0
 MAX_JSON_BYTES = 10 * 1024 * 1024
@@ -52,7 +52,7 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SemgrepFinding(_Model):
+class OpengrepFinding(_Model):
     rule_id: str
     file: str
     start_line: int
@@ -67,42 +67,42 @@ class SemgrepFinding(_Model):
     dataflow_trace: Any | None = None
 
 
-class SemgrepAnalysisResult(_Model):
-    tool: str = "semgrep"
+class OpengrepAnalysisResult(_Model):
+    tool: str = "opengrep"
     version: str | None = None
     ruleset: str
     status: str
     path: str
     files_scanned: int | None = None
     scanned_files: list[str] = Field(default_factory=list)
-    findings: list[SemgrepFinding]
+    findings: list[OpengrepFinding]
     errors: list[Any]
 
 
 def _configuration(value: str | None, *, executable: bool = False) -> str:
-    if value is None:
-        return DEFAULT_SEMGREP_PATH if executable else DEFAULT_RULESET
+    if value is None or value == "":
+        return DEFAULT_OPENGREP_PATH if executable else DEFAULT_RULESET
     if (
         not isinstance(value, str)
-        or not value
+        or not value.strip()
         or "\x00" in value
         or any(ord(c) < 32 for c in value)
     ):
-        raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep configuration is invalid")
+        raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep configuration is invalid")
     if value.startswith("-"):
-        raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep configuration is invalid")
+        raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep configuration is invalid")
     if executable:
-        return value
+        return os.path.expanduser(value) if value.startswith("~") else value
     if _REGISTRY_RULESET.fullmatch(value):
         return value
     local = Path(value)
     if not local.is_absolute() or not local.exists():
-        raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep configuration is invalid")
+        raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep configuration is invalid")
     return str(local.resolve())
 
 
 def _ruleset() -> tuple[str, str]:
-    raw = os.environ.get("WEBSEC_SEMGREP_RULESET")
+    raw = os.environ.get("WEBSEC_OPENGREP_RULESET")
     configured = _configuration(raw)
     return configured, "local-approved" if Path(configured).is_absolute() else configured
 
@@ -124,19 +124,25 @@ def _cap(value: Any, depth: int = 0) -> Any:
     return None
 
 
-def _safe_diagnostic(
-    value: Any, execution_root: Path, approved_root: Path, scan_path: Path
-) -> Any:
+def _clean_snippet(raw_snippet: Any) -> str | None:
+    if not isinstance(raw_snippet, str):
+        return None
+    stripped = raw_snippet.strip()
+    if not stripped or stripped.casefold() == "requires login":
+        return None
+    return raw_snippet[:MAX_OPTIONAL_STRING]
+
+
+def _safe_diagnostic(value: Any, execution_root: Path, approved_root: Path, scan_path: Path) -> Any:
     capped = _cap(value)
-    if isinstance(capped, dict):
-        if isinstance(capped.get("path"), str):
-            try:
-                resolved = _resolve_reported_path(execution_root, capped["path"])
-                if not _is_within(resolved, scan_path):
-                    raise ToolError("E_PARSE", "diagnostic path lies outside scan scope")
-                capped["path"] = relative_path(approved_root, resolved)
-            except ToolError:
-                capped.pop("path", None)
+    if isinstance(capped, dict) and isinstance(capped.get("path"), str):
+        try:
+            resolved = _resolve_reported_path(execution_root, capped["path"])
+            if not _is_within(resolved, scan_path):
+                raise ToolError("E_PARSE", "diagnostic path lies outside scan scope")
+            capped["path"] = relative_path(approved_root, resolved)
+        except ToolError:
+            capped.pop("path", None)
         return capped
     return capped
 
@@ -180,12 +186,14 @@ def _location(value: Any) -> tuple[int, int | None]:
         return 0, None
     line = value.get("line")
     column = value.get("col")
-    return (line if isinstance(line, int) and line > 0 else 0,
-            column if isinstance(column, int) and column > 0 else None)
+    return (
+        line if isinstance(line, int) and line > 0 else 0,
+        column if isinstance(column, int) and column > 0 else None,
+    )
 
 
 def _find_execution_root(root: Path) -> Path:
-    """Use the nearest Git worktree root so Semgrep targets nested roots reliably."""
+    """Use the nearest Git worktree root so Opengrep targets nested roots reliably."""
     for candidate in (root, *root.parents):
         if (candidate / ".git").exists():
             return candidate
@@ -207,9 +215,9 @@ def _resolve_reported_path(root: Path, value: str) -> Path:
             resolved = reported.resolve(strict=True)
             resolved.relative_to(root)
         except (OSError, RuntimeError, ValueError):
-            raise ToolError("E_PARSE", "Semgrep output is invalid") from None
+            raise ToolError("E_PARSE", "Opengrep output is invalid") from None
         if not is_analyzer_safe(resolved):
-            raise ToolError("E_PARSE", "Semgrep output is invalid")
+            raise ToolError("E_PARSE", "Opengrep output is invalid")
         return resolved
     return _resolve_relative(root, value, reject_symlink=True)
 
@@ -224,7 +232,7 @@ def _normalize(
 ) -> tuple[dict[str, Any], bool]:
     results = raw.get("results")
     if not isinstance(results, list):
-        raise ToolError("E_PARSE", "Semgrep output is invalid")
+        raise ToolError("E_PARSE", "Opengrep output is invalid")
     errors = raw.get("errors", [])
     if not isinstance(errors, list):
         errors = []
@@ -238,13 +246,13 @@ def _normalize(
         for item in paths["scanned"]:
             resolved = _resolve_reported_path(execution_root, item)
             if not _is_within(resolved, scan_path) or not is_analyzer_safe(resolved):
-                raise ToolError("E_PARSE", "Semgrep output contains an out-of-scope scanned path")
+                raise ToolError("E_PARSE", "Opengrep output contains an out-of-scope scanned path")
             scanned_files.append(relative_path(approved_root, resolved))
         scanned_files = sorted(set(scanned_files))
         files_scanned: int | None = len(scanned_files)
     else:
         files_scanned = None
-    findings: list[SemgrepFinding] = []
+    findings: list[OpengrepFinding] = []
     truncated = len(results) > MAX_FINDINGS
     for item in results[:MAX_FINDINGS]:
         if (
@@ -258,7 +266,7 @@ def _normalize(
         except ToolError:
             continue
         if not _is_within(finding_path, scan_path) or not is_analyzer_safe(finding_path):
-            raise ToolError("E_PARSE", "Semgrep output contains an out-of-scope finding path")
+            raise ToolError("E_PARSE", "Opengrep output contains an out-of-scope finding path")
         start_line, start_col = _location(item.get("start"))
         end_line, end_col = _location(item.get("end"))
         if start_line == 0:
@@ -268,27 +276,36 @@ def _normalize(
         metavars = extra.get("metavars") if isinstance(extra.get("metavars"), dict) else None
         if not exposed and metavars is not None:
             metavars = {
-                key: value for key, value in metavars.items()
+                key: value
+                for key, value in metavars.items()
                 if not (isinstance(value, dict) and "abstract_content" in value)
             }
         trace = extra.get("dataflow_trace") if exposed else None
-        snippet = extra.get("lines") if exposed and isinstance(extra.get("lines"), str) else None
-        findings.append(SemgrepFinding(
-            rule_id=item["check_id"], file=relative_path(approved_root, finding_path),
-            start_line=start_line, start_column=start_col, end_line=end_line or None,
-            end_column=end_col,
-            message=extra.get("message") if isinstance(extra.get("message"), str) else None,
-            severity=extra.get("severity") if isinstance(extra.get("severity"), str) else None,
-            snippet=snippet[:MAX_OPTIONAL_STRING] if snippet else None,
-            metadata=(
-                _cap(extra.get("metadata"))
-                if isinstance(extra.get("metadata"), dict) else None
-            ),
-            metavariables=_cap(metavars) if metavars is not None else None,
-            dataflow_trace=_normalize_trace(trace, execution_root, approved_root, scan_path) if trace is not None else None,
-        ))
+        snippet = _clean_snippet(extra.get("lines")) if exposed else None
+        findings.append(
+            OpengrepFinding(
+                rule_id=item["check_id"],
+                file=relative_path(approved_root, finding_path),
+                start_line=start_line,
+                start_column=start_col,
+                end_line=end_line or None,
+                end_column=end_col,
+                message=extra.get("message") if isinstance(extra.get("message"), str) else None,
+                severity=extra.get("severity") if isinstance(extra.get("severity"), str) else None,
+                snippet=snippet,
+                metadata=(
+                    _cap(extra.get("metadata")) if isinstance(extra.get("metadata"), dict) else None
+                ),
+                metavariables=_cap(metavars) if metavars is not None else None,
+                dataflow_trace=(
+                    _normalize_trace(trace, execution_root, approved_root, scan_path)
+                    if trace is not None
+                    else None
+                ),
+            )
+        )
     version = raw.get("version") if isinstance(raw.get("version"), str) else None
-    result = SemgrepAnalysisResult(
+    result = OpengrepAnalysisResult(
         ruleset=ruleset,
         status="completed",
         path=relative_path(approved_root, scan_path),
@@ -297,8 +314,7 @@ def _normalize(
         scanned_files=scanned_files,
         findings=findings,
         errors=[
-            _safe_diagnostic(error, execution_root, approved_root, scan_path)
-            for error in errors
+            _safe_diagnostic(error, execution_root, approved_root, scan_path) for error in errors
         ],
     ).model_dump(mode="json")
     return result, truncated
@@ -309,8 +325,6 @@ Runner = Callable[[list[str], Path, Path, Path], Awaitable[int]]
 
 async def _default_runner(argv: list[str], cwd: Path, output_path: Path, stderr_path: Path) -> int:
     child_env = os.environ.copy()
-    child_env.pop("SEMGREP_APP_TOKEN", None)
-    child_env["SEMGREP_SEND_METRICS"] = "off"
     stderr_handle = stderr_path.open("wb")
     try:
         process = await asyncio.create_subprocess_exec(
@@ -327,11 +341,11 @@ async def _default_runner(argv: list[str], cwd: Path, output_path: Path, stderr_
                 if output_path.exists() and output_path.stat().st_size > MAX_JSON_BYTES:
                     process.kill()
                     await process.wait()
-                    raise ToolError("E_TOOL_FAILED", "Semgrep output is too large")
+                    raise ToolError("E_TOOL_FAILED", "Opengrep output is too large")
                 if stderr_path.exists() and stderr_path.stat().st_size > MAX_STDERR_BYTES:
                     process.kill()
                     await process.wait()
-                    raise ToolError("E_TOOL_FAILED", "Semgrep diagnostics are too large")
+                    raise ToolError("E_TOOL_FAILED", "Opengrep diagnostics are too large")
                 if done:
                     return int(wait_task.result() or 0)
         except asyncio.CancelledError:
@@ -343,9 +357,9 @@ async def _default_runner(argv: list[str], cwd: Path, output_path: Path, stderr_
             if not wait_task.done():
                 wait_task.cancel()
     except FileNotFoundError:
-        raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep is unavailable") from None
+        raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep is unavailable") from None
     except OSError:
-        raise ToolError("E_TOOL_UNAVAILABLE", "Semgrep is unavailable") from None
+        raise ToolError("E_TOOL_UNAVAILABLE", "Opengrep is unavailable") from None
     finally:
         stderr_handle.close()
 
@@ -357,22 +371,32 @@ async def analyze_source(
     scan_path = _resolve_relative(root, path, reject_symlink=True)
     if not scan_path.is_dir() and not scan_path.is_file():
         raise ToolError("E_INVALID_ARGUMENT", "scan path is invalid")
-    executable = _configuration(os.environ.get("WEBSEC_SEMGREP_PATH"), executable=True)
+    executable = _configuration(os.environ.get("WEBSEC_OPENGREP_PATH"), executable=True)
     configured_ruleset, output_ruleset = _ruleset()
     execution_root = _find_execution_root(root)
     relative_scan = relative_path(execution_root, scan_path)
-    with tempfile.TemporaryDirectory(prefix="websec-semgrep-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="websec-opengrep-") as temp_name:
         temp = Path(temp_name)
         output_path, stderr_path = temp / "result.json", temp / "stderr.log"
         argv = [
-            # Primary --json output: Semgrep applies --dataflow-traces to the primary
-            # output format only, so a secondary --json-output file omits the traces.
-            executable, "scan", "--json", f"--output={output_path}",
-            f"--config={configured_ruleset}", "--oss-only", "--metrics=off",
-            "--disable-version-check", "--no-autofix", "--no-git-ignore",
-            "--no-rewrite-rule-ids", "--dataflow-traces", "--max-target-bytes=1000000",
-            "--max-lines-per-finding=10", "--max-chars-per-line=200", "--timeout=5",
-            "--timeout-threshold=3", "--jobs=1",
+            # Primary --json output: Opengrep applies --dataflow-traces and --taint-intrafile
+            # to the primary JSON output.
+            executable,
+            "scan",
+            "--json",
+            f"--output={output_path}",
+            f"--config={configured_ruleset}",
+            "--taint-intrafile",
+            "--disable-version-check",
+            "--no-git-ignore",
+            "--no-rewrite-rule-ids",
+            "--dataflow-traces",
+            "--max-target-bytes=1000000",
+            "--max-lines-per-finding=10",
+            "--max-chars-per-line=200",
+            "--timeout=5",
+            "--timeout-threshold=3",
+            "--jobs=1",
         ]
         argv.extend(f"--exclude={name}" for name in sorted(IGNORED_DIRS))
         argv.extend(f"--exclude={name}" for name in SENSITIVE_SCAN_EXCLUDES)
@@ -383,19 +407,19 @@ async def analyze_source(
                 execute(argv, execution_root, output_path, stderr_path), timeout=GLOBAL_TIMEOUT
             )
         except TimeoutError:
-            raise ToolError("E_TIMEOUT", "Semgrep timed out") from None
+            raise ToolError("E_TIMEOUT", "Opengrep timed out") from None
         if code != 0:
-            raise ToolError("E_TOOL_FAILED", "Semgrep failed")
+            raise ToolError("E_TOOL_FAILED", "Opengrep failed")
         try:
             if not output_path.exists() or output_path.stat().st_size > MAX_JSON_BYTES:
-                raise ToolError("E_PARSE", "Semgrep output is invalid")
+                raise ToolError("E_PARSE", "Opengrep output is invalid")
             raw = json.loads(output_path.read_text(encoding="utf-8"))
         except ToolError:
             raise
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            raise ToolError("E_PARSE", "Semgrep output is invalid") from None
+            raise ToolError("E_PARSE", "Opengrep output is invalid") from None
     if not isinstance(raw, dict):
-        raise ToolError("E_PARSE", "Semgrep output is invalid")
+        raise ToolError("E_PARSE", "Opengrep output is invalid")
     data, truncated = _normalize(
         raw,
         execution_root=execution_root,
@@ -404,8 +428,8 @@ async def analyze_source(
         ruleset=output_ruleset,
     )
     return envelope(
-        f"Semgrep completed with {len(data['findings'])} findings", data, truncated=truncated
+        f"Opengrep completed with {len(data['findings'])} findings", data, truncated=truncated
     )
 
 
-__all__ = ["SemgrepAnalysisResult", "SemgrepFinding", "analyze_source"]
+__all__ = ["OpengrepAnalysisResult", "OpengrepFinding", "analyze_source"]

@@ -100,9 +100,20 @@ WebSecuritySDK/
 │   ├── __init__.py              exports SecurityChecker, CheckResult, Finding
 │   ├── checker.py          L1   public API, typed check methods
 │   ├── config.py                model, scope, limits, server list
+│   ├── domain/                  canonical SDK/Module 2 domain models & enums
+│   ├── recon/                   Module 1 recon mapping -> Evidence, Observations, TargetModel
+│   ├── analysis/                Module 2 deterministic injection analysis (7 domain subpackages)
+│   │   ├── opengrep_adapter/    snapshot hashing, offline ruleset/scope validation, LocalOpengrepAdapter
+│   │   ├── inputs/              InputCandidate normalization, state accumulator, extractors
+│   │   ├── route_binding/       Tree-sitter JS/TS & Python AST route-to-handler binding
+│   │   ├── ast_taint/           intra-procedural JS/TS & Python backward def-use taint tracer
+│   │   ├── sinks/               9-tier CWE/SinkKind classifier, redaction, trace parser, AST enrichment
+│   │   ├── cve/                 A05 scope policy, seed catalog provider, version interval matcher
+│   │   ├── correlation/         6-stage deterministic evidence correlation, trust policy, packaging
+│   │   └── data/                cve_seed_catalog.json
 │   ├── checks/             L2   one Check definition per check
 │   │   ├── base.py              Check model + REGISTRY
-│   │   └── headers.py  tls.py  cookies.py  cors.py
+│   │   └── headers.py  tls.py  cookies.py  cors.py  surface.py
 │   ├── engine/                  the agent runtime
 │   │   ├── runner.py            builds and drives the Agent for one check
 │   │   ├── models.py            "provider:model-id" -> a Strands model
@@ -121,19 +132,32 @@ WebSecuritySDK/
 │   ├── telemetry/               spans + hook events -> result.trace
 │   └── skills/                  SKILL.md folders, one per check
 ├── mcp_servers/websec_tools/  L6  constrained security tool server
-│   └── recon/                 reconnaissance tool implementations
 │   ├── server.py                MCP tool definitions
 │   ├── probes.py                HTTP, TLS and CORS probes
 │   ├── errors.py                stable tool errors and safe redaction
-│   ├── nmap.py                  host/service discovery
-│   ├── zap.py                   Spider and passive analysis
-│   ├── whatweb.py               technology fingerprinting
-│   └── openapi.py               API specification parsing
+│   ├── recon/                   reconnaissance tool implementations
+│   │   ├── browser.py           Playwright browser exploration adapter
+│   │   ├── nmap.py              host/service discovery
+│   │   ├── openapi.py           API specification parsing
+│   │   ├── whatweb.py           technology fingerprinting
+│   │   └── zap.py               Spider and passive analysis
+│   └── analysis/                deterministic source inspection & Opengrep wrapper
+│       ├── opengrep.py          bounded CLI execution (--taint-intrafile, --dataflow-traces)
+│       └── source.py            inspect_source_tree, read_source_file, search_source
 ├── examples/
 │   ├── probe_target.py          direct L6 recon verification, no MCP or model
+│   ├── analyze_source.py        direct L6 source/Opengrep check helper
 │   └── run_check.py             full agent run, needs model credentials
 └── tests/
 ```
+
+The Module 2 deterministic analysis layer (`src/websecuritycheck/analysis/`) follows
+a strict acyclic dependency hierarchy: leaf extractors and tracers (`opengrep_adapter/`,
+`inputs/`, `cve/`, `ast_taint/`) feed `sinks/` and `route_binding/`, which in turn feed
+the 6-stage `correlation/` pipeline (`correlate_evidence`, `acorrelate_evidence`,
+`build_correlation_envelope`). Top-level `analysis/__init__.py` and each subpackage's
+`__init__.py` re-export stable symbols without crossing into `engine/` or LLM hypothesis
+generation.
 
 The Layer 6 MCP package is organized as `recon/` (network/web integrations)
 and `analysis/` (deterministic source tools). It exposes the four analysis
@@ -141,13 +165,15 @@ tools `inspect_source_tree`, `read_source_file`, `search_source`, and
 `analyze_source`. These tools return repository-relative facts only; they do
 not decide exploitability, generate payloads, or produce vulnerability
 verdicts. Source-content exposure is stricter than the policy used for files
-Semgrep may inspect, and sensitive finding content is redacted.
+Opengrep may inspect, and sensitive finding content is redacted.
 
-Semgrep is an external executable configured on the MCP host with
-`WEBSEC_SEMGREP_PATH` and `WEBSEC_SEMGREP_RULESET` (defaults `semgrep` and
-`p/default`). Callers cannot supply rules, commands, executable paths, or
-environment variables. The wrapper uses fixed argv, bounded output, a global
-timeout, sanitized environment, and temporary files outside the repository.
+Opengrep is an external executable configured on the MCP host with
+`WEBSEC_OPENGREP_PATH` and `WEBSEC_OPENGREP_RULESET` (defaults `opengrep` and
+`p/default`; Module 2 `LocalOpengrepAdapter` enforces explicit local ruleset paths in
+strict offline mode). Callers cannot supply rules, commands, executable paths, or
+environment variables. The wrapper uses fixed argv (`--json`, `--taint-intrafile`,
+`--dataflow-traces`), bounded output, a global timeout, sanitized environment, and
+temporary files outside the repository.
 
 Only `checker.py` and `results/` are public. Everything else is internal.
 
