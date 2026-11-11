@@ -267,7 +267,7 @@ def make_shop_analysis_request_with_scope(
     return req
 
 
-def make_semgrep_finding(
+def make_opengrep_finding(
     rule_id: str = "python.django.security.injection.sql-injection",
     file: str = "app/routes.py",
     start_line: int = 42,
@@ -283,7 +283,7 @@ def make_semgrep_finding(
     dataflow_trace: dict | None = None,
     extra_metadata: dict | None = None,
 ) -> dict:
-    """Build a normalized Semgrep finding dictionary."""
+    """Build a normalized Opengrep finding dictionary."""
     meta = {"confidence": confidence}
     if cwe is not None:
         meta["cwe"] = cwe if isinstance(cwe, list) else [cwe]
@@ -306,20 +306,20 @@ def make_semgrep_finding(
     return finding
 
 
-def make_semgrep_envelope(
+def make_opengrep_envelope(
     findings: list[dict] | None = None,
     *,
-    tool: str = "semgrep",
+    tool: str = "opengrep",
     version: str = "1.90.0",
     ruleset: str = "local-approved",
     path: str = ".",
     truncated: bool = False,
     errors: list | None = None,
 ) -> dict:
-    """Build a Layer 6 Semgrep envelope payload."""
+    """Build a Layer 6 Opengrep envelope payload."""
     finding_list = findings if findings is not None else []
     return {
-        "summary": f"Semgrep completed with {len(finding_list)} findings",
+        "summary": f"Opengrep completed with {len(finding_list)} findings",
         "data": {
             "tool": tool,
             "version": version,
@@ -352,7 +352,7 @@ def make_technology_record(
     )
 
 
-def make_taint_semgrep_finding(
+def make_taint_opengrep_finding(
     rule_id: str = "python.sqlalchemy.security.audit.sqli.raw-sql",
     file: str = "app/routes.py",
     start_line: int = 42,
@@ -365,7 +365,7 @@ def make_taint_semgrep_finding(
     confidence: str | None = "HIGH",
     extra_metadata: dict | None = None,
 ) -> dict:
-    """Build a normalized Semgrep finding with a realistic dataflow_trace."""
+    """Build a normalized Opengrep finding with a realistic dataflow_trace."""
     dataflow_trace = {
         "taint_source": [
             {
@@ -398,7 +398,7 @@ def make_taint_semgrep_finding(
             }
         ],
     }
-    return make_semgrep_finding(
+    return make_opengrep_finding(
         rule_id=rule_id,
         file=file,
         start_line=start_line,

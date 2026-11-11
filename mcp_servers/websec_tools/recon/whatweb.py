@@ -162,7 +162,7 @@ async def fingerprint_web(
     executable: str | None = None,
 ) -> dict[str, Any]:
     _validate_target(target)
-    executable = executable or os.getenv("WEBSEC_WHATWEB_PATH", "whatweb")
+    executable = executable or os.getenv("WEBSEC_WHATWEB_PATH") or "whatweb"
     with tempfile.TemporaryDirectory(prefix="websec-whatweb-") as directory:
         output_path = Path(directory) / "result.json"
         argv = [

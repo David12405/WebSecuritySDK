@@ -11,7 +11,7 @@ $$\text{Raw Tool Output} \rightarrow \text{EvidenceArtifactRecord} \rightarrow \
 >
 > These Cloudflare applications are **deterministic test targets**. They do **NOT** contain live, exploitable SQL injection, command injection, XSS, or SSRF vulnerabilities. All reflected inputs are HTML-escaped, and runtime execution is strictly protected.
 >
-> For static taint analysis (Module 2 / Semgrep ruleset), they include **safe simulated sink stubs** (`db.prepare`, `childProcess.exec`, `new Function` with runtime guards) modeling untrusted data flows from HTTP inputs to injection sinks without executing external commands or connecting to live databases.
+> For static taint analysis (Module 2 / Opengrep ruleset), they include **safe simulated sink stubs** (`db.prepare`, `childProcess.exec`, `new Function` with runtime guards) modeling untrusted data flows from HTTP inputs to injection sinks without executing external commands or connecting to live databases.
 >
 > Their purpose is to serve as **deterministic ground-truth targets** for testing:
 > - HTTP reconnaissance & metadata collection

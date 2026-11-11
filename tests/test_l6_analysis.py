@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mcp_servers.websec_tools import server
-from mcp_servers.websec_tools.analysis import semgrep, source
+from mcp_servers.websec_tools.analysis import opengrep, source
 from mcp_servers.websec_tools.errors import ToolError
 
 
@@ -44,7 +44,7 @@ def test_source_paths_and_sensitive_content_are_rejected(tmp_path: Path):
     assert error.value.code == "E_UNSUPPORTED_INPUT"
 
 
-def test_semgrep_parser_uses_authoritative_scanned_paths_and_redacts(tmp_path: Path):
+def test_opengrep_parser_uses_authoritative_scanned_paths_and_redacts(tmp_path: Path):
     (tmp_path / ".env.production").write_text("TOKEN=secret", encoding="utf-8")
 
     async def fake_runner(argv, cwd, output_path, stderr_path):
@@ -74,7 +74,7 @@ def test_semgrep_parser_uses_authoritative_scanned_paths_and_redacts(tmp_path: P
         )
         return 0
 
-    result = run(semgrep.analyze_source(str(tmp_path), runner=fake_runner))
+    result = run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
     finding = result["data"]["findings"][0]
     assert result["data"]["files_scanned"] == 1
     assert result["data"]["scanned_files"] == [".env.production"]
@@ -84,13 +84,15 @@ def test_semgrep_parser_uses_authoritative_scanned_paths_and_redacts(tmp_path: P
     assert finding["metavariables"] == {}
 
 
-def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
+def test_opengrep_missing_scanned_paths_is_null_and_uses_taint_intrafile(tmp_path: Path):
     (tmp_path / "main.py").write_text("x = 1", encoding="utf-8")
 
     async def fake_runner(argv, cwd, output_path, stderr_path):
         assert "--no-git-ignore" in argv
         assert "--no-rewrite-rule-ids" in argv
+        assert "--taint-intrafile" in argv
         assert "--dataflow-traces" in argv
+        assert "--oss-only" not in argv
         assert "--json" in argv
         assert f"--output={output_path}" in argv
         assert not any(arg.startswith("--json-output") for arg in argv)
@@ -100,13 +102,45 @@ def test_semgrep_missing_scanned_paths_is_null(tmp_path: Path):
         Path(output_path).write_text(json.dumps({"results": [], "errors": []}), encoding="utf-8")
         return 0
 
-    result = run(semgrep.analyze_source(str(tmp_path), runner=fake_runner))
+    result = run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
+    assert result["data"]["tool"] == "opengrep"
     assert result["data"]["files_scanned"] is None
     assert result["data"]["scanned_files"] == []
     assert result["data"]["findings"] == []
 
 
-def test_semgrep_nested_root_uses_git_root_and_normalizes_scanned_files(tmp_path: Path):
+def test_opengrep_strips_requires_login_placeholder(tmp_path: Path):
+    (tmp_path / "app.js").write_text("eval(x);\n", encoding="utf-8")
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        Path(output_path).write_text(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "check_id": "js.eval",
+                            "path": "app.js",
+                            "start": {"line": 1, "col": 1},
+                            "end": {"line": 1, "col": 8},
+                            "extra": {
+                                "lines": "requires login",
+                                "message": "eval",
+                                "severity": "ERROR",
+                            },
+                        }
+                    ],
+                    "errors": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return 0
+
+    result = run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
+    assert result["data"]["findings"][0]["snippet"] is None
+
+
+def test_opengrep_nested_root_uses_git_root_and_normalizes_scanned_files(tmp_path: Path):
     repo = tmp_path / "repo"
     approved = repo / "nested" / "approved"
     approved.mkdir(parents=True)
@@ -129,12 +163,12 @@ def test_semgrep_nested_root_uses_git_root_and_normalizes_scanned_files(tmp_path
         )
         return 0
 
-    result = run(semgrep.analyze_source(str(approved), runner=fake_runner))
+    result = run(opengrep.analyze_source(str(approved), runner=fake_runner))
     assert result["data"]["files_scanned"] == 1
     assert result["data"]["scanned_files"] == ["main.py"]
 
 
-def test_semgrep_explicit_nested_file_is_the_command_target(tmp_path: Path):
+def test_opengrep_explicit_nested_file_is_the_command_target(tmp_path: Path):
     repo = tmp_path / "repo"
     approved = repo / "tests" / "fixture"
     source_file = approved / "positive" / "worker.js"
@@ -158,15 +192,13 @@ def test_semgrep_explicit_nested_file_is_the_command_target(tmp_path: Path):
         return 0
 
     result = run(
-        semgrep.analyze_source(
-            str(approved), path="positive/worker.js", runner=fake_runner
-        )
+        opengrep.analyze_source(str(approved), path="positive/worker.js", runner=fake_runner)
     )
     assert result["data"]["files_scanned"] == 1
     assert result["data"]["scanned_files"] == ["positive/worker.js"]
 
 
-def test_semgrep_preserves_cli_dataflow_trace_with_relative_paths(tmp_path: Path):
+def test_opengrep_preserves_cli_dataflow_trace_with_relative_paths(tmp_path: Path):
     repo = tmp_path / "repo"
     approved = repo / "fixture"
     worker = approved / "worker.js"
@@ -216,7 +248,7 @@ def test_semgrep_preserves_cli_dataflow_trace_with_relative_paths(tmp_path: Path
         )
         return 0
 
-    result = run(semgrep.analyze_source(str(approved), runner=fake_runner))
+    result = run(opengrep.analyze_source(str(approved), runner=fake_runner))
     exposed, redacted = result["data"]["findings"]
     assert exposed["file"] == "worker.js"
     normalized = exposed["dataflow_trace"]
@@ -232,7 +264,7 @@ def test_semgrep_preserves_cli_dataflow_trace_with_relative_paths(tmp_path: Path
     assert redacted["dataflow_trace"] is None
 
 
-def test_semgrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
+def test_opengrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
     approved = tmp_path / "approved"
     approved.mkdir()
     outside = tmp_path / "outside.py"
@@ -252,14 +284,42 @@ def test_semgrep_rejects_out_of_scope_scanned_path(tmp_path: Path):
         return 0
 
     with pytest.raises(ToolError, match=r"invalid|out-of-scope"):
-        run(semgrep.analyze_source(str(approved), runner=fake_runner))
+        run(opengrep.analyze_source(str(approved), runner=fake_runner))
+
+
+def test_opengrep_empty_env_vars_fall_back_and_whitespace_fails(tmp_path: Path, monkeypatch):
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+    seen_argv: list[str] = []
+
+    async def fake_runner(argv, cwd, output_path, stderr_path):
+        seen_argv.extend(argv)
+        output_path.write_text(json.dumps({"results": [], "errors": []}), encoding="utf-8")
+        return 0
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "")
+    monkeypatch.setenv("WEBSEC_OPENGREP_RULESET", "")
+    result = run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
+    assert seen_argv[0] == opengrep.DEFAULT_OPENGREP_PATH
+    assert f"--config={opengrep.DEFAULT_RULESET}" in seen_argv
+    assert result["data"]["ruleset"] == opengrep.DEFAULT_RULESET
+
+    monkeypatch.setenv("WEBSEC_OPENGREP_PATH", "   ")
+    with pytest.raises(ToolError, match="Opengrep configuration is invalid"):
+        run(opengrep.analyze_source(str(tmp_path), runner=fake_runner))
 
 
 def test_mcp_registration_is_backward_compatible():
     names = {tool.__name__ for tool in server.TOOLS}
     assert {
-        "get_response_headers", "get_cookies", "get_tls_info", "get_cors_policy",
-        "discover_hosts", "discover_services", "crawl_web", "passive_web_analysis",
-        "fingerprint_web", "parse_api_spec",
+        "get_response_headers",
+        "get_cookies",
+        "get_tls_info",
+        "get_cors_policy",
+        "discover_hosts",
+        "discover_services",
+        "crawl_web",
+        "passive_web_analysis",
+        "fingerprint_web",
+        "parse_api_spec",
     } <= names
     assert {"inspect_source_tree", "read_source_file", "search_source", "analyze_source"} <= names

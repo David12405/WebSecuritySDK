@@ -231,7 +231,7 @@ def _is_safe_relative_path(path_text: str) -> bool:
 
 
 class SinkCandidate(StrictModel):
-    """Static source-code sink candidate extracted from Semgrep findings.
+    """Static source-code sink candidate extracted from Opengrep findings.
 
     Deliberately omits endpoint_id: static source findings never imply HTTP
     endpoint reachability on their own.
@@ -263,7 +263,7 @@ class SinkCandidate(StrictModel):
             )
         if not self.evidence_refs:
             raise ValueError(
-                f"SinkCandidate {self.sink_id} requires at least one Semgrep evidence_ref"
+                f"SinkCandidate {self.sink_id} requires at least one Opengrep evidence_ref"
             )
         return self
 
