@@ -107,6 +107,20 @@ async def test_whatweb_uses_fixed_arguments_and_cleans_temporary_output():
     assert output_path is not None and not output_path.exists()
 
 
+@async_test
+async def test_whatweb_empty_env_falls_back_to_binary_on_path(monkeypatch):
+    seen_argv = []
+
+    async def runner(argv, path, timeout):
+        seen_argv.extend(argv)
+        path.write_text(json.dumps([{"plugins": {}}]), encoding="utf-8")
+        return 0
+
+    monkeypatch.setenv("WEBSEC_WHATWEB_PATH", "")
+    await whatweb.fingerprint_web("https://example.com", runner=runner)
+    assert seen_argv[0] == "whatweb"
+
+
 def test_openapi_parser_supports_json_yaml_and_rejects_external_refs():
     document = {
         "openapi": "3.0.0",
