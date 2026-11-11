@@ -44,6 +44,11 @@ from websecuritycheck.hypothesis import (  # noqa: E402
     heuristic_selector,
 )
 from websecuritycheck.hypothesis.labels import describe, endpoint_labels  # noqa: E402
+from websecuritycheck.hypothesis.slices import (  # noqa: E402
+    SourceSlicer,
+    describe_slices,
+    slices_for_records,
+)
 
 
 def load_env(path: Path = REPO_ROOT / ".env") -> None:
@@ -87,6 +92,14 @@ def parse_args() -> argparse.Namespace:
         help=(
             "captured Module 1 request, so endpoints read as 'POST /api/search' "
             "rather than a hash. Defaults to request_<name>.json beside the envelope."
+        ),
+    )
+    parser.add_argument(
+        "--source-root",
+        help=(
+            "the scanned repository, so the handler's source can be quoted into "
+            "the prompt instead of only its file and line (e.g. "
+            "test-targets/cloudflare/targets/api)"
         ),
     )
     parser.add_argument("--json", dest="json_path", help="write the hypotheses to this file")
@@ -225,12 +238,21 @@ def main() -> int:
             print(f"  limitation: {limitation}")
         return 0
 
+    slices: dict[str, str] = {}
+    if args.source_root:
+        slicer = SourceSlicer(args.source_root)
+        slices = slices_for_records(output, correlation.records, slicer)
+        print(f"read {describe_slices(slices)} from {args.source_root}")
+        for error in slicer.errors:
+            print(f"  could not read: {error}")
+
     baseline = generate_hypotheses(
         output,
         correlation.records,
         select_inputs=heuristic_selector,
         max_inputs_per_sink=args.max_inputs,
         endpoint_labels=labels,
+        code_slices=slices,
     )
     chosen = baseline
 
@@ -242,6 +264,7 @@ def main() -> int:
             select_inputs=selector,
             max_inputs_per_sink=args.max_inputs,
             endpoint_labels=labels,
+            code_slices=slices,
         )
         if args.compare:
             report(

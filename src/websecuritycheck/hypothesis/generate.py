@@ -154,6 +154,12 @@ class SelectionRequest:
     #: `keyword` on `/api/search` is a far better candidate than the same
     #: name on `/healthz` - so a selector that can read it decides better.
     endpoint_label: str = ""
+    #: The handler's source, line-numbered with the sink marked, when a
+    #: caller supplied it. This turns the question from "which name sounds
+    #: injectable" into "which value does this code put in the query", and
+    #: it is the difference between guessing and reading. Empty by default:
+    #: nothing in this package reads the filesystem on its own.
+    code_slice: str = ""
 
 
 #: Answers with positions in `SelectionRequest.candidates`, never with ids.
@@ -205,6 +211,7 @@ def generate_hypotheses(
     select_inputs: InputSelector = heuristic_selector,
     max_inputs_per_sink: int = 3,
     endpoint_labels: Mapping[str, str] | None = None,
+    code_slices: Mapping[str, str] | None = None,
 ) -> GenerationResult:
     """Build one hypothesis per relation Module 2 verified, and no more.
 
@@ -229,6 +236,7 @@ def generate_hypotheses(
             max_inputs_per_sink=max_inputs_per_sink,
             counter=counter,
             endpoint_labels=endpoint_labels,
+            code_slices=code_slices,
         )
         result.hypotheses.extend(result_for.hypotheses)
         result.limitations.extend(result_for.limitations)
@@ -261,6 +269,7 @@ def _hypotheses_for_record(
     max_inputs_per_sink: int,
     counter: _Counter,
     endpoint_labels: Mapping[str, str] | None = None,
+    code_slices: Mapping[str, str] | None = None,
 ) -> GenerationResult:
     out = GenerationResult()
     kind = _kind(record)
@@ -319,6 +328,7 @@ def _hypotheses_for_record(
         select_inputs=select_inputs,
         max_inputs_per_sink=max_inputs_per_sink,
         endpoint_labels=endpoint_labels,
+        code_slices=code_slices,
     )
     if not chosen:
         out.limitations.append(
@@ -355,6 +365,7 @@ def _choose_inputs(
     select_inputs: InputSelector,
     max_inputs_per_sink: int,
     endpoint_labels: Mapping[str, str] | None = None,
+    code_slices: Mapping[str, str] | None = None,
 ) -> list[InputCandidate]:
     """The input Module 2 proved, or the ones a selector proposes.
 
@@ -373,6 +384,7 @@ def _choose_inputs(
     request = SelectionRequest(
         endpoint_id=endpoint_id,
         endpoint_label=label_for(endpoint_id, endpoint_labels),
+        code_slice=(code_slices or {}).get(endpoint_id, ""),
         sink_id=record.sink_ref or "",
         sink_kind=_sink_kind_hint(category),
         vulnerability_category=category.value,

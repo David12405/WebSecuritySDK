@@ -21,10 +21,18 @@ from .generate import (
 from .guard import HypothesisGuardError, check_hypotheses, enforce
 from .labels import describe, endpoint_labels, label_for
 from .llm import LLMInputSelector, SelectionAnswer
+from .slices import (
+    CodeRange,
+    SourceSlicer,
+    describe_slices,
+    handler_ranges,
+    slices_for_records,
+)
 
 __all__ = [
     "CAPABILITY_FOR",
     "SIGNALS_FOR",
+    "CodeRange",
     "GenerationResult",
     "HypothesisGuardError",
     "InputChoice",
@@ -32,11 +40,15 @@ __all__ = [
     "LLMInputSelector",
     "SelectionAnswer",
     "SelectionRequest",
+    "SourceSlicer",
     "check_hypotheses",
     "describe",
+    "describe_slices",
     "endpoint_labels",
     "enforce",
     "generate_hypotheses",
+    "handler_ranges",
     "heuristic_selector",
     "label_for",
+    "slices_for_records",
 ]

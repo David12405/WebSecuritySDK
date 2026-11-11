@@ -621,3 +621,120 @@ def test_selector_is_told_the_path_not_just_the_hash():
     assert seen[0].endpoint_label == "GET /api/users"
     # The path is real signal for the model, so it has to reach the prompt.
     assert "GET /api/users" in prompt_for(seen[0])
+
+
+# --------------------------------------------------------------------------- #
+# Code slices: reading the handler instead of guessing from names
+# --------------------------------------------------------------------------- #
+
+
+def test_handler_ranges_come_from_route_binding_evidence(captured):
+    from websecuritycheck.hypothesis.slices import handler_ranges
+
+    output, correlation = captured
+    ranges = handler_ranges(output)
+
+    for record in correlation.records:
+        span = ranges[record.endpoint_id]
+        sink = next(s for s in output.sink_candidates if s.sink_id == record.sink_ref)
+        # The binding is only useful if the sink really sits inside it.
+        assert span.file_path == sink.file_path
+        assert span.start_line <= sink.start_line <= span.end_line
+
+
+def test_slice_quotes_the_handler_and_marks_the_sink(tmp_path):
+    from websecuritycheck.hypothesis.slices import CodeRange, SourceSlicer
+
+    source = tmp_path / "app.js"
+    source.write_text("\n".join(f"line {n}" for n in range(1, 21)), encoding="utf-8")
+
+    text = SourceSlicer(tmp_path).read(CodeRange("app.js", 3, 6), highlight=[5])
+
+    assert "    3 | line 3" in text
+    assert ">    5 | line 5" in text  # the sink line carries the marker
+    assert "line 7" not in text
+
+
+def test_slice_windows_a_long_handler_around_the_sink(tmp_path):
+    from websecuritycheck.hypothesis.slices import CodeRange, SourceSlicer
+
+    source = tmp_path / "app.js"
+    source.write_text("\n".join(f"line {n}" for n in range(1, 301)), encoding="utf-8")
+
+    text = SourceSlicer(tmp_path, max_lines=20).read(CodeRange("app.js", 1, 300), highlight=[150])
+
+    # One very long function must not crowd out the rest of the prompt, and
+    # the part worth keeping is what surrounds the sink.
+    assert "line 150" in text
+    assert "line 1\n" not in text
+    assert "(lines" in text, "a trimmed window says so rather than looking complete"
+
+
+def test_slicer_refuses_to_read_outside_the_source_root(tmp_path):
+    from websecuritycheck.hypothesis.slices import CodeRange, SourceSlicer
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("not yours", encoding="utf-8")
+
+    slicer = SourceSlicer(root)
+    assert slicer.read(CodeRange("../secret.txt", 1, 1)) == ""
+    assert any("outside the approved source root" in item for item in slicer.errors)
+
+
+def test_missing_source_is_reported_not_raised(tmp_path):
+    from websecuritycheck.hypothesis.slices import CodeRange, SourceSlicer
+
+    slicer = SourceSlicer(tmp_path)
+    assert slicer.read(CodeRange("nope.js", 1, 5)) == ""
+    assert slicer.errors, "an unreadable file is a note, never a crash"
+
+
+def test_slice_reaches_the_prompt_framed_as_untrusted():
+    from websecuritycheck.hypothesis.llm import prompt_for
+
+    output = Module2Output.model_validate(_minimal_output())
+    record = _record(
+        kind=CorrelationKind.ENDPOINT_SINK,
+        status=CorrelationStatus.PARTIAL,
+        confidence=ConfidenceLevel.LOW,
+        input_ref=None,
+        sink_relationship=SinkRelationship.UNVERIFIED_STATIC_SINK,
+    )
+    seen: list[SelectionRequest] = []
+
+    generate_hypotheses(
+        output,
+        [record],
+        select_inputs=lambda request: (seen.append(request), [0])[1],
+        code_slices={"a" * 12: ">   42 | db.query(sql)"},
+    )
+
+    text = prompt_for(seen[0])
+    assert ">   42 | db.query(sql)" in text
+    assert "untrusted" in text
+    # With the source present the question becomes one of fact, so the model
+    # is asked to cite lines rather than rank names.
+    assert "line where its value enters" in text
+
+
+def test_generation_reads_no_files_without_slices():
+    """Hypothesis generation still runs from one JSON file and nothing else."""
+    output = Module2Output.model_validate(_minimal_output())
+    seen: list[SelectionRequest] = []
+
+    generate_hypotheses(
+        output,
+        [
+            _record(
+                kind=CorrelationKind.ENDPOINT_SINK,
+                status=CorrelationStatus.PARTIAL,
+                confidence=ConfidenceLevel.LOW,
+                input_ref=None,
+                sink_relationship=SinkRelationship.UNVERIFIED_STATIC_SINK,
+            )
+        ],
+        select_inputs=lambda request: (seen.append(request), [0])[1],
+    )
+
+    assert all(request.code_slice == "" for request in seen)
