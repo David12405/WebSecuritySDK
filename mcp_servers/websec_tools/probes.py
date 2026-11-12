@@ -13,13 +13,15 @@ import ssl
 from datetime import UTC, datetime
 from http.cookies import SimpleCookie
 from typing import Any
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from pydantic import BaseModel, ConfigDict, Field
 
+from ._params import MAX_JSON_DEPTH, body_parameter_names, json_field_names
+from ._urls import same_origin as is_same_origin
 from .errors import ToolError, envelope, safe_message
 
 TIMEOUT_SECONDS = 10.0
@@ -112,20 +114,16 @@ def _header_value(headers: dict[str, str], name: str) -> str | None:
     return None
 
 
+def _json_field_names(value: Any, prefix: str = "", depth: int = 0) -> list[str]:
+    return json_field_names(
+        value, prefix, depth, max_depth=MAX_JSON_DEPTH, max_length=MAX_VALUE_LENGTH
+    )
+
+
 def _body_parameter_names(body: str | bytes | None, content_type: str | None) -> list[str]:
-    if body is None:
-        return []
-    text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
-    if content_type and "json" in content_type.lower():
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return []
-        if isinstance(value, dict):
-            return sorted(str(key) for key in value)
-    if content_type and "x-www-form-urlencoded" in content_type.lower():
-        return sorted({key for key, _value in parse_qsl(text, keep_blank_values=True)})
-    return []
+    return body_parameter_names(
+        body, content_type, max_depth=MAX_JSON_DEPTH, max_length=MAX_VALUE_LENGTH
+    )
 
 
 _SENSITIVE_BODY_KEYS = (
@@ -326,16 +324,9 @@ async def _fetch(
         _validate_target(next_target)
         current_parts = urlsplit(current)
         next_parts = urlsplit(next_target)
-        same_origin = (
-            current_parts.scheme.lower() == next_parts.scheme.lower()
-            and (current_parts.hostname or "").rstrip(".").lower()
-            == (next_parts.hostname or "").rstrip(".").lower()
-            and (current_parts.port or (443 if current_parts.scheme == "https" else 80))
-            == (next_parts.port or (443 if next_parts.scheme == "https" else 80))
-        )
         if current_parts.scheme == "https" and next_parts.scheme == "http":
             raise ProbeError("E_SCOPE", "redirect would downgrade HTTPS to HTTP")
-        if not same_origin:
+        if not is_same_origin(current, next_target):
             raise ProbeError("E_SCOPE", "redirect destination is outside the initial origin")
         chain.append({"from": current, "to": next_target, "status": response.status_code})
         current = next_target

@@ -333,7 +333,65 @@ async def test_probe_http_rejects_unsupported_method_before_request():
 
 
 @async_test
+async def test_probe_http_flattens_nested_json_body_parameter_names():
+    async def handler(request):
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    async with make_client(handler) as client:
+        result = await probes.probe_http(
+            "https://example.com/api/search",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            body='{"user":{"id":"7","profile":{"role":"guest"}},"tags":[{"name":"x"}]}',
+            client=client,
+        )
+
+    assert result["data"]["request_parameter_names"] == [
+        "tags",
+        "tags.name",
+        "user",
+        "user.id",
+        "user.profile",
+        "user.profile.role",
+    ]
+
+
+@async_test
 async def test_tls_probe_rejects_http_and_preserves_stable_code():
     with pytest.raises(probes.ProbeError) as error:
         await probes.get_tls_info("http://example.com")
     assert error.value.code == "E_TLS"
+
+
+def test_shared_params_and_urls_helpers_are_consistent_across_tools():
+    from mcp_servers.websec_tools import _params, _urls
+    from mcp_servers.websec_tools.recon import browser, zap
+
+    # Deep JSON (> 8 levels) is bounded cleanly without RecursionError across all tools.
+    deep_json: dict = {"leaf": 1}
+    for depth in range(12):
+        deep_json = {f"lvl{depth}": deep_json}
+    deep_payload = json.dumps(deep_json)
+    expected = _params.body_parameter_names(deep_payload, "application/json")
+    assert len(expected) == 8
+    assert probes._body_parameter_names(deep_payload, "application/json") == expected
+    assert zap._body_parameter_names(deep_payload, "application/json") == expected
+    assert browser._body_names(deep_payload, "application/json") == expected
+
+    # Multipart ignores non-Content-Disposition name= occurrences consistently across tools.
+    multipart = (
+        "--b\r\n"
+        'Content-Disposition: form-data; name="field1"\r\n\r\n'
+        'ignored name="fake_body_attr"\r\n--b--'
+    )
+    ct = "multipart/form-data; boundary=b"
+    assert _params.body_parameter_names(multipart, ct) == ["field1"]
+    assert probes._body_parameter_names(multipart, ct) == ["field1"]
+    assert zap._body_parameter_names(multipart, ct) == ["field1"]
+    assert browser._body_names(multipart, ct) == ["field1"]
+
+    # Shared URL origin normalization handles default ports, trailing dots, IPv6, invalid inputs.
+    assert _urls.same_origin("https://Example.COM.:443/a", "https://example.com/b") is True
+    assert _urls.same_origin("http://[::1]:80/x", "http://[::1]/y") is True
+    assert _urls.same_origin("ftp://example.com/a", "ftp://example.com/b") is False
+    assert _urls.origin_identity("http://example.com:badport/a") is None

@@ -13,11 +13,18 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from .._params import (
+    MAX_JSON_DEPTH,
+    body_parameter_names,
+    json_field_names,
+    query_parameter_names,
+)
+from .._urls import same_origin as _same_origin
 from ..errors import ToolError, envelope, safe_message
 from ..probes import _validate_target
 
@@ -44,6 +51,7 @@ class CrawledEndpoint(BaseModel):
     query_parameter_names: list[str] = Field(default_factory=list)
     method: str | None = None
     status: int | None = None
+    request_content_type: str | None = None
     content_type: str | None = None
     body_parameter_names: list[str] = Field(default_factory=list)
     source: str = "zap_spider"
@@ -187,36 +195,17 @@ def _origin(target: str) -> tuple[str, str]:
     return origin, parsed.hostname or ""
 
 
-def _origin_identity(url: str) -> tuple[str, str, int] | None:
-    parsed = urlsplit(url)
-    scheme = parsed.scheme.lower()
-    hostname = parsed.hostname
-    if scheme not in {"http", "https"} or hostname is None:
-        return None
-    try:
-        port = parsed.port
-    except ValueError:
-        return None
-    effective_port = port if port is not None else (443 if scheme == "https" else 80)
-    return scheme, hostname.rstrip(".").lower(), effective_port
-
-
-def _same_origin(url: str, origin: str) -> bool:
-    return _origin_identity(url) == _origin_identity(origin)
-
-
 def _endpoint(url: str) -> CrawledEndpoint | None:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
-    query_names = sorted({key for key, _value in parse_qsl(parsed.query, keep_blank_values=True)})
     return CrawledEndpoint(
         url=url,
         scheme=parsed.scheme,
         host=parsed.hostname,
         port=parsed.port,
         path=parsed.path or "/",
-        query_parameter_names=query_names,
+        query_parameter_names=query_parameter_names(url, max_length=MAX_TEXT),
     )
 
 
@@ -328,34 +317,16 @@ def _headers(raw_headers: Any) -> tuple[str, dict[str, str]]:
     return start_line, headers
 
 
-def _json_field_names(value: Any, prefix: str = "") -> list[str]:
-    names: list[str] = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            name = f"{prefix}.{key}" if prefix else str(key)
-            names.append(name[:MAX_TEXT])
-            names.extend(_json_field_names(child, name))
-    elif isinstance(value, list):
-        for child in value[:10]:
-            names.extend(_json_field_names(child, prefix))
-    return names
+def _json_field_names(value: Any, prefix: str = "", depth: int = 0) -> list[str]:
+    return json_field_names(value, prefix, depth, max_depth=MAX_JSON_DEPTH, max_length=MAX_TEXT)
 
 
 def _body_parameter_names(raw_body: Any, content_type: str | None) -> list[str]:
-    if not isinstance(raw_body, str) or not raw_body or not content_type:
+    if not isinstance(raw_body, str):
         return []
-    normalized = content_type.lower()
-    if "json" in normalized:
-        try:
-            value = json.loads(raw_body)
-        except (TypeError, ValueError):
-            return []
-        return sorted(set(_json_field_names(value)))
-    if "x-www-form-urlencoded" in normalized:
-        return sorted({name[:MAX_TEXT] for name, _ in parse_qsl(raw_body, keep_blank_values=True)})
-    if "multipart/form-data" in normalized:
-        return sorted(set(re.findall(r'name="([^"\r\n]{1,2048})"', raw_body)))
-    return []
+    return body_parameter_names(
+        raw_body, content_type, max_depth=MAX_JSON_DEPTH, max_length=MAX_TEXT
+    )
 
 
 def _proxy_message(value: Any, *, target: str) -> CrawledEndpoint | None:
@@ -388,9 +359,7 @@ def _proxy_message(value: Any, *, target: str) -> CrawledEndpoint | None:
         port = parsed.port
     except ValueError:
         return None
-    query_names = sorted(
-        {name[:MAX_TEXT] for name, _ in parse_qsl(parsed.query, keep_blank_values=True)}
-    )
+    query_names = query_parameter_names(request_url, max_length=MAX_TEXT)
     sanitized_host = parsed.hostname
     if ":" in sanitized_host and not sanitized_host.startswith("["):
         sanitized_host = f"[{sanitized_host}]"
@@ -407,7 +376,12 @@ def _proxy_message(value: Any, *, target: str) -> CrawledEndpoint | None:
         status = int(raw_status) if raw_status is not None else None
     except (TypeError, ValueError):
         status = None
-    request_content_type = request_headers.get("content-type")
+    raw_request_content_type = request_headers.get("content-type")
+    request_content_type = (
+        raw_request_content_type.split(";", 1)[0].strip().lower()
+        if raw_request_content_type
+        else None
+    )
     response_content_type = response_headers.get("content-type")
     if response_content_type:
         response_content_type = response_content_type.split(";", 1)[0].strip().lower()
@@ -420,6 +394,7 @@ def _proxy_message(value: Any, *, target: str) -> CrawledEndpoint | None:
         query_parameter_names=query_names,
         method=method,
         status=status,
+        request_content_type=request_content_type,
         content_type=response_content_type,
         body_parameter_names=_body_parameter_names(value.get("requestBody"), request_content_type),
         source="zap_proxy",
@@ -474,7 +449,19 @@ async def collect_proxy_traffic(
     http_client: httpx.AsyncClient | None = None,
     requester: ZapRequester | None = None,
 ) -> dict[str, Any]:
-    """Collect and sanitize proxy traffic already observed after a capture boundary."""
+    """Collect and sanitize proxy traffic observed after a capture boundary.
+
+    Pagination & Concurrency Limitations:
+        ZAP exposes a single session-global message history via
+        ``/JSON/core/view/numberOfMessages/`` and 0-indexed ascending pages via
+        ``/JSON/core/view/messages/``. When more than ``MAX_PROXY_MESSAGES``
+        messages exist since the boundary, collection tail-bounds to the most
+        recent window (``end_message_index - MAX_PROXY_MESSAGES``) so recent
+        traffic is not starved by older messages. Under concurrent assessments
+        sharing one ZAP daemon, unrelated traffic shares this global index and
+        same-origin messages cannot be isolated per assessment; dedicated ZAP
+        session/daemon isolation per assessment is required for strict isolation.
+    """
 
     _validate_target(target)
     target_origin = _origin(target)[0]
@@ -502,7 +489,8 @@ async def collect_proxy_traffic(
             range_size = end_message_index - boundary.start_message_index
             fetch_count = min(range_size, MAX_PROXY_MESSAGES)
             raw_messages: list[Any] = []
-            offset = boundary.start_message_index
+            # Tail-bound to the most recent window when history exceeds MAX_PROXY_MESSAGES.
+            offset = end_message_index - fetch_count
             while len(raw_messages) < fetch_count:
                 page_size = min(PROXY_MESSAGE_PAGE_SIZE, fetch_count - len(raw_messages))
                 response = await client.get(
@@ -531,9 +519,21 @@ async def collect_proxy_traffic(
             excluded_message_count += 1
         else:
             messages.append(message)
+    overflow_count = max(range_size - MAX_PROXY_MESSAGES, 0)
     missing_fetched_messages = max(fetch_count - len(raw_messages), 0)
-    dropped_message_count = max(range_size - MAX_PROXY_MESSAGES, 0) + missing_fetched_messages
+    dropped_message_count = overflow_count + missing_fetched_messages
     truncated = dropped_message_count > 0
+    limitations: list[str] = []
+    if overflow_count > 0:
+        limitations.append(
+            f"Collection hit MAX_PROXY_MESSAGES ({MAX_PROXY_MESSAGES}); {overflow_count} "
+            "older message(s) were omitted in favor of the most recent window."
+        )
+    if missing_fetched_messages > 0:
+        limitations.append(
+            "ZAP returned fewer messages than expected during pagination; additional "
+            "messages may be missing if history was pruned or modified concurrently."
+        )
     sanitized_text = json.dumps(
         [message.model_dump(mode="json") for message in messages],
         sort_keys=True,
@@ -560,12 +560,19 @@ async def collect_proxy_traffic(
                     "capture_ref": capture_ref,
                     "excluded_message_count": excluded_message_count,
                     "dropped_message_count": dropped_message_count,
+                    "overflow_message_count": overflow_count,
+                    "missing_fetched_messages": missing_fetched_messages,
+                    "incomplete_capture": truncated,
+                    **({"limitations": limitations} if limitations else {}),
                 },
             }
         ],
     )
+    summary = f"ZAP proxy capture collected {len(messages)} in-scope messages"
+    if truncated:
+        summary += f" (incomplete: {dropped_message_count} earlier or unavailable messages omitted)"
     return envelope(
-        f"ZAP proxy capture collected {len(messages)} in-scope messages",
+        summary,
         result.model_dump(mode="json"),
         truncated,
     )

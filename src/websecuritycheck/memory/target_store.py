@@ -7,7 +7,13 @@ import sqlite3
 from pathlib import Path
 from typing import Protocol
 
-from websecuritycheck.domain import ReconProcessingResult, TargetModel, ToolExecutionResult
+from websecuritycheck.domain import (
+    EvidenceArtifactRecord,
+    ObservationRecord,
+    ReconProcessingResult,
+    TargetModel,
+    ToolExecutionResult,
+)
 from websecuritycheck.recon.endpoints import normalize_origin
 
 
@@ -103,6 +109,67 @@ class SQLiteTargetStore:
             (assessment_id, target_identity(target)),
         ).fetchone()
         return TargetModel.model_validate(json.loads(row[0])) if row else None
+
+    def load_allocated_ids(self, assessment_id: str) -> tuple[set[str], set[str]]:
+        """Return all previously persisted (evidence_ids, observation_ids) for an assessment."""
+        rows = self._connection.execute(
+            """SELECT processing_json FROM execution_journal
+               WHERE assessment_id=? AND processing_json IS NOT NULL
+               ORDER BY rowid ASC""",
+            (assessment_id,),
+        ).fetchall()
+        evidence_ids: set[str] = set()
+        observation_ids: set[str] = set()
+        for row in rows:
+            raw = json.loads(row[0])
+            for item in raw.get("evidence_records") or ():
+                if isinstance(item, dict) and item.get("evidence_id"):
+                    evidence_ids.add(str(item["evidence_id"]))
+            for item in raw.get("observation_records") or ():
+                if isinstance(item, dict) and item.get("observation_id"):
+                    observation_ids.add(str(item["observation_id"]))
+        return evidence_ids, observation_ids
+
+    def load_processing_records(
+        self, assessment_id: str, target: str | None = None
+    ) -> tuple[list[ObservationRecord], list[EvidenceArtifactRecord]]:
+        """Retrieve journalled observations and evidence records in chronological order."""
+        if target is not None:
+            identity = target_identity(target)
+            target_row = self._connection.execute(
+                "SELECT target_id FROM targets WHERE assessment_id=? AND canonical_target=?",
+                (assessment_id, identity),
+            ).fetchone()
+            if not target_row:
+                return [], []
+            rows = self._connection.execute(
+                """SELECT processing_json FROM execution_journal
+                   WHERE assessment_id=? AND target_id=? AND processing_json IS NOT NULL
+                   ORDER BY rowid ASC""",
+                (assessment_id, str(target_row[0])),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """SELECT processing_json FROM execution_journal
+                   WHERE assessment_id=? AND processing_json IS NOT NULL
+                   ORDER BY rowid ASC""",
+                (assessment_id,),
+            ).fetchall()
+        observations: list[ObservationRecord] = []
+        evidence_records: list[EvidenceArtifactRecord] = []
+        seen_obs: set[str] = set()
+        seen_evd: set[str] = set()
+        for row in rows:
+            processing = ReconProcessingResult.model_validate(json.loads(row[0]))
+            for evd in processing.evidence_records:
+                if evd.evidence_id not in seen_evd:
+                    seen_evd.add(evd.evidence_id)
+                    evidence_records.append(evd)
+            for obs in processing.observation_records:
+                if obs.observation_id not in seen_obs:
+                    seen_obs.add(obs.observation_id)
+                    observations.append(obs)
+        return observations, evidence_records
 
     def allocate_execution_id(self, assessment_id: str) -> str:
         row = self._connection.execute(
