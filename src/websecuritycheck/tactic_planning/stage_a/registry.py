@@ -51,6 +51,8 @@ class TacticRegistry(Protocol):
 
     def find_by_content_hash(self, category: str, content_sha256: str) -> AdmittedTactic | None: ...
 
+    def get_wstg_snapshot(self, requested_id: str, version: str) -> WstgSnapshot | None: ...
+
     def publish(
         self,
         document: TacticDocument,
@@ -153,6 +155,21 @@ class FileTacticRegistry:
             if admitted.metadata.content_sha256 == content_sha256:
                 return admitted
         return None
+
+    def get_wstg_snapshot(self, requested_id: str, version: str) -> WstgSnapshot | None:
+        """A previously persisted raw WSTG snapshot (Tier 2 cache), or None.
+
+        Lets Stage A re-author within a stable WSTG version without re-querying
+        the source: a tactic-cache miss (e.g. a policy change) reuses the stored
+        snapshot instead of hitting the network again.
+        """
+        path = self.root / "wstg" / version / requested_id / "raw.json"
+        if not path.is_file():
+            return None
+        try:
+            return WstgSnapshot.model_validate_json(path.read_text("utf-8"))
+        except Exception as exc:
+            raise RegistryError(f"corrupt WSTG snapshot at {path}: {exc}") from exc
 
     # --- version allocation ---------------------------------------------- #
 

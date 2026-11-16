@@ -33,8 +33,10 @@ from .wstg import (
     EXPECTED_WSTG_VERSION,
     WstgAdapter,
     WstgSnapshot,
+    reference_for,
     retrieve_snapshot,
     snapshot_metadata,
+    validate_snapshot,
 )
 
 DEFAULT_MAX_RETRIES = 2
@@ -96,8 +98,7 @@ def resolve_tactic(
     else:
         trace.append("author: active tactic incompatible with current environment")
 
-    snapshot = retrieve_snapshot(adapter, category)
-    trace.append(f"wstg: retrieved {snapshot.returned_id} ({snapshot.wstg_version})")
+    snapshot = _resolve_snapshot(category, registry=registry, adapter=adapter, trace=trace)
 
     feedback: list[str] = []
     last_report: list[str] = []
@@ -137,6 +138,29 @@ def resolve_tactic(
     raise TacticResolutionError(
         f"tactic authoring failed after {max_retries + 1} attempt(s)", report=last_report
     )
+
+
+def _resolve_snapshot(
+    category: VulnerabilityCategory,
+    *,
+    registry: TacticRegistry,
+    adapter: WstgAdapter,
+    trace: list[str],
+) -> WstgSnapshot:
+    """Tier 2: reuse a persisted WSTG snapshot, else fetch it from the source.
+
+    A stored snapshot for the current version is validated and reused, so a
+    tactic-cache miss does not re-query WSTG when the content has not changed.
+    """
+    bare_id, _versioned = reference_for(category)
+    cached = registry.get_wstg_snapshot(bare_id, EXPECTED_WSTG_VERSION)
+    if cached is not None:
+        snapshot = validate_snapshot(cached, category)
+        trace.append(f"wstg: snapshot cache hit {snapshot.returned_id}")
+        return snapshot
+    snapshot = retrieve_snapshot(adapter, category)
+    trace.append(f"wstg: fetched {snapshot.returned_id} from source ({snapshot.wstg_version})")
+    return snapshot
 
 
 def _publish(

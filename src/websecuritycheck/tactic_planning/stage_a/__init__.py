@@ -37,12 +37,16 @@ from .validation import REQUIRED_WSTG_REFERENCE, admit_tactic
 from .wstg import (
     CATEGORY_TO_WSTG,
     EXPECTED_WSTG_VERSION,
+    OWASP_WSTG_TAG,
+    WSTG_DOC_PATHS,
+    GithubWstgAdapter,
     RecordedWstgAdapter,
     WstgAdapter,
     WstgRetrievalError,
     WstgSnapshot,
     reference_for,
     retrieve_snapshot,
+    validate_snapshot,
 )
 
 __all__ = [
@@ -52,14 +56,17 @@ __all__ = [
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_ROOT",
     "EXPECTED_WSTG_VERSION",
+    "OWASP_WSTG_TAG",
     "PROMPT_VERSION",
     "REQUIRED_WSTG_REFERENCE",
     "TACTIC_SCHEMA_VERSION",
+    "WSTG_DOC_PATHS",
     "AdmittedTactic",
     "CompatibilityFingerprint",
     "EnvironmentFingerprint",
     "FakeTacticAuthor",
     "FileTacticRegistry",
+    "GithubWstgAdapter",
     "RecordedWstgAdapter",
     "RegistryError",
     "ResolvedTactic",
@@ -80,4 +87,5 @@ __all__ = [
     "reference_for",
     "resolve_tactic",
     "retrieve_snapshot",
+    "validate_snapshot",
 ]

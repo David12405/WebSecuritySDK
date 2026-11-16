@@ -70,6 +70,7 @@ from websecuritycheck.tactic_planning.contracts import SQLiSafetyPolicy, SQLiTec
 from websecuritycheck.tactic_planning.stage_a import (  # noqa: E402
     FakeTacticAuthor,
     FileTacticRegistry,
+    GithubWstgAdapter,
     RecordedWstgAdapter,
     StrandsTacticAuthor,
     TacticDocument,
@@ -273,6 +274,13 @@ def parse_args() -> argparse.Namespace:
         help="plan only this hypothesis id (e.g. HYP-001); default plans every "
         "SQL_INJECTION hypothesis in the envelope",
     )
+    parser.add_argument(
+        "--wstg-source",
+        choices=["recorded", "github"],
+        default="recorded",
+        help="recorded: bundled offline snapshot (default); github: fetch the "
+        "canonical document live from the official OWASP WSTG repo (tag v4.2)",
+    )
     parser.add_argument("--json", dest="json_path", help="write the admitted plan(s) to this file")
     return parser.parse_args()
 
@@ -366,7 +374,11 @@ def main() -> int:
     # One shared registry across hypotheses: the first authors the tactic, the
     # rest reuse it warm (no WSTG, no model) - visible in the trace.
     registry = FileTacticRegistry(REPO_ROOT / ".websec" / "tactic-registry")
-    adapter = RecordedWstgAdapter(WSTG_DIR)
+    if args.wstg_source == "github":
+        adapter = GithubWstgAdapter()
+        print("WSTG source: official OWASP repo (github, tag v4.2)")
+    else:
+        adapter = RecordedWstgAdapter(WSTG_DIR)
     plans = []
     for hypothesis in sqli:
         result = prepare_sql_injection_plan(

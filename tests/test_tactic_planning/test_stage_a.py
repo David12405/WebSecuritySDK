@@ -6,6 +6,7 @@ for the service and the model, so nothing here needs a network or credentials.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from websecuritycheck.tactic_planning.contracts import SQLiSafetyPolicy
 from websecuritycheck.tactic_planning.stage_a import (
     FakeTacticAuthor,
     FileTacticRegistry,
+    GithubWstgAdapter,
     RegistryError,
     TacticResolutionError,
     WstgRetrievalError,
@@ -25,6 +27,7 @@ from websecuritycheck.tactic_planning.stage_a import (
     reference_for,
     resolve_tactic,
     retrieve_snapshot,
+    validate_snapshot,
 )
 
 from ._factories import (
@@ -293,3 +296,87 @@ def test_tampered_yaml_is_detected():
         tactic_file.write_text(yaml.safe_dump(data), encoding="utf-8")
         with pytest.raises(RegistryError, match="hash mismatch"):
             registry.get_active("SQL_INJECTION")
+
+
+# --------------------------------------------------------------------------- #
+# Tier 2 WSTG snapshot cache
+# --------------------------------------------------------------------------- #
+
+
+def test_absent_snapshot_cache_returns_none():
+    with tempfile.TemporaryDirectory() as d:
+        registry = FileTacticRegistry(d)
+        assert registry.get_wstg_snapshot("WSTG-INPV-05", "v42") is None
+
+
+def test_reauthor_reuses_cached_snapshot_without_touching_source():
+    with tempfile.TemporaryDirectory() as d:
+        registry = FileTacticRegistry(d)
+        author = FakeTacticAuthor(reference_tactic_document())
+        resolve_tactic(
+            SQLI,
+            registry=registry,
+            author=author,
+            adapter=recorded_adapter(),
+            safety_policy=enabled_policy(),
+            model_name="fake",
+            now=NOW,
+        )
+        # Publishing cached the snapshot. A policy change invalidates the tactic
+        # (Tier 1 miss) but the WSTG content is unchanged, so Stage A must reuse
+        # the stored snapshot - a raising adapter proves the source is untouched.
+        changed = SQLiSafetyPolicy(enabled=True, aggregate_max_requests=300)
+        second = resolve_tactic(
+            SQLI,
+            registry=registry,
+            author=author,
+            adapter=_RaisingAdapter(),
+            safety_policy=changed,
+            model_name="fake",
+            now=NOW,
+        )
+        assert second.reused is False
+        assert second.tactic.metadata.tactic_version == "0.1.1"
+        assert any("snapshot cache hit" in line for line in second.trace)
+
+
+# --------------------------------------------------------------------------- #
+# GithubWstgAdapter (official OWASP repo)
+# --------------------------------------------------------------------------- #
+
+
+def test_github_adapter_builds_versioned_snapshot(monkeypatch):
+    import httpx
+
+    class _FakeResponse:
+        text = "# Testing for SQL Injection\n\n|WSTG-INPV-05|\n\nMethodology text."
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse())
+    snapshot = GithubWstgAdapter().get_test_case("WSTG-INPV-05")
+    assert snapshot.returned_id == "WSTG-v42-INPV-05"
+    assert snapshot.wstg_version == "v42"
+    assert "OWASP/wstg/v4.2" in snapshot.source_uri
+    assert snapshot.license == "CC BY-SA 4.0"
+    # The provenance checks accept it as the SQLi reference.
+    validate_snapshot(snapshot, SQLI)
+
+
+def test_github_adapter_unknown_id_rejected_without_network():
+    with pytest.raises(WstgRetrievalError, match="document path"):
+        GithubWstgAdapter().get_test_case("WSTG-INPV-99")
+
+
+@pytest.mark.live_wstg
+@pytest.mark.skipif(
+    not os.environ.get("WEBSEC_LIVE_WSTG"),
+    reason="set WEBSEC_LIVE_WSTG=1 to fetch from the official OWASP repo",
+)
+def test_github_adapter_live_fetch_is_authentic():
+    """Opt-in: really fetch WSTG-INPV-05 from the official OWASP repo."""
+    snapshot = retrieve_snapshot(GithubWstgAdapter(), SQLI)
+    assert snapshot.wstg_version == "v42"
+    assert "WSTG-INPV-05" in snapshot.content
+    assert "SQL Injection" in snapshot.content
