@@ -1,0 +1,218 @@
+schema_version: "0.1.0"
+tactic_id: "TACTIC-SQLI-001"
+name: "sqli_testing"
+mode: "GUIDED_AGENT"
+
+scope:
+  vulnerability: "SQL_INJECTION"
+  supported_input_locations:
+    - "QUERY"
+    - "FORM"
+    - "JSON_BODY"
+    - "COOKIE"
+    - "HEADER"
+  limitations:
+    - "Relational DBMS SQL injection detection, verification, and identification-only DBMS fingerprinting"
+    - "Excludes NoSQL, ORM query parser injection, second-order, OOB, and stacked queries in v0.1"
+    - "No DB/table enumeration, data dumping, OS shell execution, file read/write, or WAF bypass"
+
+references:
+  - "WSTG-INJT-05"
+  - "docs/SQLI_TACTIC_GUIDE.md"
+  - "docs/CAPABILITY_CONTRACTS.md"
+
+required_context:
+  - name: "target_url"
+    source: "M1.EndpointDefinition"
+    required: true
+    description: "Authorized absolute URL assembled from EndpointDefinition.origin + path"
+  - name: "method"
+    source: "M1.EndpointDefinition"
+    required: true
+    description: "HTTP method declared for the candidate endpoint"
+  - name: "parameter_name"
+    source: "M2.InputCandidate"
+    required: true
+    description: "Target input parameter name from InputCandidate.parameter_name"
+  - name: "parameter_location"
+    source: "M2.InputCandidate"
+    required: true
+    description: "InputLocation enum value (QUERY, FORM, JSON_BODY, COOKIE, HEADER)"
+  - name: "hypothesis"
+    source: "M2.Hypothesis"
+    required: true
+    description: "SQL_INJECTION hypothesis context, confidence, and rationale"
+  - name: "expected_signals"
+    source: "M2.ValidationCapabilityRequirement"
+    required: false
+    description: "Expected validation signals (e.g. SQL_SYNTAX_ERROR, BOOLEAN_RESPONSE_DIFF, TIMING_DIFF)"
+  - name: "execution_policy"
+    source: "M1.ExecutionPolicy"
+    required: true
+    description: "Authorized scope, active testing permission, and request/time budgets"
+  - name: "request_artifact_ref"
+    source: "M1.EvidenceArtifactRecord"
+    required: false
+    description: "Opaque reference to M1 HTTP_RAW_EXCHANGE template for Adapter request-file construction"
+  - name: "auth_ref"
+    source: "M1.AssessmentConfig.auth_references"
+    required: false
+    description: "Opaque credential reference resolved inside Adapter when endpoint requires auth"
+  - name: "dbms_hint"
+    source: "M1.TargetModel"
+    required: false
+    description: "Optional relational DBMS technology hint (TechnologyCategory.DATABASE)"
+
+capabilities:
+  - id: "HTTP_REQUEST"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#2-http_request"
+    role: "required"
+  - id: "SQLI_DETECTION"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#3-sqli_detection"
+    role: "required"
+
+safety_rules:
+  - "Never test outside explicitly authorized scope or ExecutionPolicy"
+  - "Do not invoke destructive operations, data dumping, DB/table enumeration, OS shell, file R/W, or WAF bypass"
+  - "Use bounded requests/timeouts and enforce risk_profile=LOW (SQLMap --risk=1) in v0.1"
+  - "Treat M2 hypothesis confidence and expected_signals strictly as prioritization hints, never as proof"
+  - "CONFIRMED requires verified technique-specific proof linked to control/test observations and redacted evidence refs"
+
+steps:
+  - id: "preflight"
+    goal: "Verify authorization, scope, policy permission, supported input location, and required target context"
+    recommended_capability: null
+    guidance: >-
+      Check authorized scope, ExecutionPolicy permission for active SQLi testing, supported parameter_location
+      (QUERY, FORM, JSON_BODY, COOKIE, HEADER), and auth_ref availability before sending any HTTP traffic.
+    next_options:
+      - when: "policy_denied"
+        action: "POLICY_BLOCKED"
+        reason: "Target is out of scope or active SQLi testing is denied by ExecutionPolicy"
+      - when: "unsupported_input"
+        action: "UNSUPPORTED"
+        reason: "InputLocation or flow variant (e.g. NoSQL, OOB, DOM) is outside v0.1 scope"
+      - when: "missing_required_context"
+        action: "INCONCLUSIVE"
+        reason: "Missing required endpoint, parameter, or auth context to construct a safe request"
+      - when: "ready"
+        action: "baseline"
+        reason: "Preconditions satisfied; proceed to baseline HTTP verification"
+
+  - id: "baseline"
+    goal: "Establish reproducible baseline behavior and target stability before SQLi testing"
+    recommended_capability: "HTTP_REQUEST"
+    guidance: >-
+      Call HTTP_REQUEST (default 2 samples) preferring request_artifact_ref and auth_ref when present.
+      Inspect baseline_ready, target_stable, auth_failure_detected, rate_limited, and waf_or_filter_detected.
+      A single HTTP 200 response alone does not establish response stability.
+    suggested_inputs:
+      sample_count: 2
+      timeout_seconds: 15
+    next_options:
+      - when: "tool_error"
+        action: "ERROR"
+        reason: "Transport failure, DNS/connect failure, or tool timeout prevented baseline check"
+      - when: "not_ready_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Auth expired, rate limited, WAF blocked, or target unstable (baseline_ready=false)"
+      - when: "baseline_ready"
+        action: "primary_detection"
+        reason: "Reproducible baseline captured; proceed with low-noise SQLi detection"
+
+  - id: "primary_detection"
+    goal: "Run tool-managed ERROR, BOOLEAN, and UNION SQLi detection under LOW risk profile"
+    recommended_capability: "SQLI_DETECTION"
+    guidance: >-
+      Invoke SQLI_DETECTION passing baseline_artifact_refs, parameter_name, parameter_location, and
+      request_artifact_ref (if available). Prefer [ERROR, BOOLEAN, UNION] unless grounded context narrows
+      it; let the underlying Adapter/tool handle payload construction and DBMS detection. Never treat a
+      heuristic_signal_detected=true alone as confirmation.
+    suggested_inputs:
+      techniques:
+        - "ERROR"
+        - "BOOLEAN"
+        - "UNION"
+      risk_profile: "LOW"
+      max_requests: 150
+      timeout_seconds: 120
+    next_options:
+      - when: "verified_proof"
+        action: "finalize"
+        reason: "Verified proof reported; evaluate evidence invariants before finalizing"
+      - when: "interrupted_or_unstable"
+        action: "INCONCLUSIVE"
+        reason: "Auth failure, rate limit, WAF block, or target instability invalidated detection"
+      - when: "no_proof_and_time_testing_ready"
+        action: "optional_time_detection"
+        reason: "No proof yet, target_stable=true, budget allows, and TIME signal/priority warrants escalation"
+      - when: "no_proof_and_no_pending_signals"
+        action: "finalize"
+        reason: "Summarize completed tests without escalating to time-based blind testing"
+
+  - id: "optional_time_detection"
+    goal: "Conditionally test time-based blind SQLi only when justified and safe"
+    recommended_capability: "SQLI_DETECTION"
+    optional: true
+    guidance: >-
+      Run TIME detection ONLY if policy allows it, target_stable is true, remaining budget is sufficient,
+      and either TIMING_DIFF is in expected_signals, heuristic_signal_detected was true, or hypothesis
+      confidence is MEDIUM/HIGH. Hypothesis confidence alone never forces TIME testing if timing is unstable.
+    suggested_inputs:
+      techniques:
+        - "TIME"
+      risk_profile: "LOW"
+      max_requests: 100
+      timeout_seconds: 120
+    next_options:
+      - when: "verified_proof"
+        action: "finalize"
+        reason: "Time-based proof reported; evaluate invariants and baseline contrast"
+      - when: "unreliable_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Latency variance, rate limiting, or blocking made timing inference untrustworthy"
+      - when: "completed_without_proof"
+        action: "finalize"
+        reason: "Finalize negative coverage summary"
+      - when: "not_allowed_or_not_ready"
+        action: "finalize"
+        reason: "Skip TIME testing and disclose limited coverage in final outcome"
+
+  - id: "finalize"
+    goal: "Cross-check evidence invariants and return final verifiable assessment outcome"
+    recommended_capability: null
+    guidance: >-
+      Verify detection_status, confirmed_techniques, proofs[].verified, control/test observation links,
+      redacted evidence artifact_refs, and any unresolved blockers or heuristic indicators.
+    next_options:
+      - when: "verified_technique_and_valid_evidence"
+        action: "CONFIRMED"
+        reason: "At least one confirmed technique passed deterministic proof verification and evidence checks"
+      - when: "heuristic_or_missing_evidence_or_unresolved_blocker"
+        action: "INCONCLUSIVE"
+        reason: "Only heuristic signal seen, proof/evidence missing, or target stability/auth barrier unresolved"
+      - when: "selected_tests_completed_cleanly_without_proof"
+        action: "NOT_CONFIRMED"
+        reason: "Selected detection passes completed cleanly without finding proof within tested scope"
+
+outcomes:
+  - "CONFIRMED"
+  - "NOT_CONFIRMED"
+  - "INCONCLUSIVE"
+  - "ERROR"
+  - "UNSUPPORTED"
+  - "POLICY_BLOCKED"
+
+confirmation_rules:
+  - "A boolean confirmed flag from a tool alone is insufficient for CONFIRMED"
+  - "Each confirmed technique must have proof with verified=true linked to control_observation_refs, test_observation_refs, and non-empty redacted evidence_refs"
+  - "ERROR requires attributable SQL error signature difference against control observation"
+  - "BOOLEAN requires reproducible true/false response differential controlling for dynamic page elements"
+  - "UNION requires controlled non-sensitive marker reflection in the expected response structure"
+  - "TIME requires repeatable delay contrast against a stable baseline (target_stable=true)"
+  - "NOT_CONFIRMED covers only tested_techniques and must never claim complete absence of SQLi"
+
+upgrade_notes:
+  - "To upgrade to Option C (Hybrid), promote preflight and finalize steps to mandatory deterministic system gates"
+  - "Replace natural-language next_options.when predicates with typed expressions once capability output schemas stabilize"
+  - "Preserve capability IDs, I/O contracts, proof invariants, and evidence rules cleanly across A -> C migration"

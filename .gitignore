@@ -8,6 +8,9 @@
 *.db
 *.sqlite3
 
+# Tactic registry runtime state (Stage A publishes here; not committed)
+.websec/
+
 # Reports produced by a local run
 report.json
 *.sarif
