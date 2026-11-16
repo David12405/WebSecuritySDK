@@ -1,10 +1,10 @@
 {
   "evidence_records": [
     {
-      "artifact_ref": "http-exchange-2d8e5ec310a740a9",
+      "artifact_ref": "http-exchange-72418c640f03f92b",
       "artifact_type": "HTTP_RAW_EXCHANGE",
       "assessment_id": "ASM-103",
-      "captured_at": "2026-11-11T02:43:37.783644Z",
+      "captured_at": "2026-11-11T08:47:50.766398Z",
       "evidence_id": "EVD-001",
       "execution_ref": "EXEC-001",
       "media_type": "application/json",
@@ -18,8 +18,8 @@
         "tool_id": "probe_http"
       },
       "redaction_applied": true,
-      "sha256_hash": "2d8e5ec310a740a9a25157fd5f446dc518b76dc251edf38de8e417a9f53f5252",
-      "size_bytes": 1163,
+      "sha256_hash": "72418c640f03f92b9fd7a4a49dfcc5562c42e6e5a6ed5150c142296f28f15f2f",
+      "size_bytes": 1169,
       "source_tool_id": "probe_http",
       "storage_uri": null,
       "truncated": false
@@ -28,7 +28,7 @@
       "artifact_ref": "openapi-document-0f9cc610889ea736",
       "artifact_type": "TOOL_RAW_OUTPUT",
       "assessment_id": "ASM-103",
-      "captured_at": "2026-11-11T02:43:38.126099Z",
+      "captured_at": "2026-11-11T08:47:51.102672Z",
       "evidence_id": "EVD-002",
       "execution_ref": "EXEC-002",
       "media_type": "application/json; charset=utf-8",
@@ -58,7 +58,7 @@
       "execution_ref": "EXEC-001",
       "observation_id": "OBS-001",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:37.783644Z",
+      "observed_at": "2026-11-11T08:47:50.766398Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -86,7 +86,7 @@
       "execution_ref": "EXEC-002",
       "observation_id": "OBS-002",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "observed_at": "2026-11-11T08:47:51.102672Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -124,7 +124,7 @@
       "execution_ref": "EXEC-002",
       "observation_id": "OBS-003",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "observed_at": "2026-11-11T08:47:51.102672Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -208,7 +208,7 @@
       "execution_ref": "EXEC-002",
       "observation_id": "OBS-004",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "observed_at": "2026-11-11T08:47:51.102672Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -281,7 +281,7 @@
       "execution_ref": "EXEC-002",
       "observation_id": "OBS-005",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "observed_at": "2026-11-11T08:47:51.102672Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -319,7 +319,7 @@
       "execution_ref": "EXEC-002",
       "observation_id": "OBS-006",
       "observation_type": "ENDPOINT",
-      "observed_at": "2026-11-11T02:43:38.126099Z",
+      "observed_at": "2026-11-11T08:47:51.102672Z",
       "payload": {
         "declared_security": [],
         "kind": "endpoint",
@@ -646,7 +646,7 @@
         "response_content_types": []
       }
     ],
-    "last_updated": "2026-11-11T02:43:38.126099Z",
+    "last_updated": "2026-11-11T08:47:51.102672Z",
     "revision": 2,
     "schema_version": "3.0.0",
     "scope_rules": {

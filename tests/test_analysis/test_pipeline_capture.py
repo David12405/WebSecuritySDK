@@ -1,13 +1,13 @@
 """Opt-in capture: run the real M1 -> M2 driver and save envelope fixtures.
 
 This does two jobs at once. It proves `websecuritycheck.pipeline` works end to
-end against an authorized lab target (recon tools + Semgrep + correlation), and
+end against an authorized lab target (recon tools + Opengrep + correlation), and
 it writes the resulting `Module2CorrelationEnvelope` to a JSON fixture so the AI
 hypothesis agent can be developed and unit-tested offline against real data
 instead of hand-built mocks.
 
 Gated exactly like the live integration test - nothing runs without
-`RUN_LIVE_M1_M2=1` and a configured Semgrep. Fixtures land in
+`RUN_LIVE_M1_M2=1` and a configured Opengrep. Fixtures land in
 `tests/test_analysis/captured_envelopes/` and are redacted before writing.
 """
 
@@ -29,8 +29,8 @@ from test_analysis.m1_m2_live_support import (
     resolve_primary_ruleset,
     trust_policy,
 )
-from websecuritycheck.analysis.semgrep_adapter import (
-    LocalSemgrepAdapter,
+from websecuritycheck.analysis.opengrep_adapter import (
+    LocalOpengrepAdapter,
     compute_ruleset_sha256,
 )
 from websecuritycheck.pipeline import build_default_recon_steps, collect_m1, run_module2
@@ -77,7 +77,7 @@ def test_capture_envelope_fixture(case: TargetCase) -> None:
             run_module2(
                 request,
                 trust_policy=policy,
-                analyzer=LocalSemgrepAdapter(ruleset_path=ruleset),
+                analyzer=LocalOpengrepAdapter(ruleset_path=ruleset),
             )
         )
     except LiveDependencyError as exc:

@@ -1,6 +1,6 @@
-"""Deterministic tests for the M1 -> M2 driver (no network, no Semgrep).
+"""Deterministic tests for the M1 -> M2 driver (no network, no Opengrep).
 
-`run_module2` is exercised with a pre-captured Semgrep payload so the whole
+`run_module2` is exercised with a pre-captured Opengrep payload so the whole
 Module 2 pipeline runs offline; `collect_m1` is exercised with fake recon
 steps so the orchestration (folding, optional-skip, failure) is tested without
 touching a target.
@@ -13,10 +13,10 @@ from functools import wraps
 
 import pytest
 from test_analysis.fixtures import (
+    make_opengrep_envelope,
     make_scope_rules,
-    make_semgrep_envelope,
     make_shop_analysis_request_with_scope,
-    make_taint_semgrep_finding,
+    make_taint_opengrep_finding,
     make_test_trust_policy,
 )
 
@@ -69,12 +69,12 @@ async def _boom() -> dict:
 @async_test
 async def test_run_module2_seals_envelope_with_empty_hypotheses():
     request = make_shop_analysis_request_with_scope(source_repo_path="/repo/shop")
-    payload = make_semgrep_envelope([make_taint_semgrep_finding()])
+    payload = make_opengrep_envelope([make_taint_opengrep_finding()])
 
     envelope = await run_module2(
         request,
         trust_policy=make_test_trust_policy(),
-        semgrep_payload=payload,
+        opengrep_payload=payload,
     )
 
     assert isinstance(envelope, Module2CorrelationEnvelope)

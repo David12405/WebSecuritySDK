@@ -1,7 +1,7 @@
 """The one judgement in hypothesis generation a model is actually better at.
 
 Everything else in this package is a lookup or a copy. The exception is this:
-Semgrep found a SQL sink inside a request handler but could not trace which
+Opengrep found a SQL sink inside a request handler but could not trace which
 parameter reaches it, and the endpoint takes four. Deciding that `keyword`
 probably ends up in a `LIKE` clause while `minPrice` is compared as a number
 is reasoning about what the names mean, which is what a language model is

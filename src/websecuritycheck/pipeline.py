@@ -29,8 +29,8 @@ from .analysis.correlation import (
 )
 from .analysis.cve import extract_cve_candidates
 from .analysis.inputs import extract_input_candidates
+from .analysis.opengrep_adapter import AsyncSourceAnalysisPort
 from .analysis.route_binding import extract_route_bindings
-from .analysis.semgrep_adapter import AsyncSourceAnalysisPort
 from .analysis.sinks import aextract_sink_candidates
 from .domain import (
     ArtifactManifest,
@@ -153,14 +153,14 @@ async def run_module2(
     *,
     trust_policy: CorrelationTrustPolicy,
     analyzer: AsyncSourceAnalysisPort | None = None,
-    semgrep_payload: Mapping[str, Any] | None = None,
+    opengrep_payload: Mapping[str, Any] | None = None,
 ) -> Module2CorrelationEnvelope:
     """Run the Module 2 analysis pipeline over `request` and seal the envelope.
 
     The order follows Module 2's handoff section 11: extract inputs, CVEs and
     sinks, bind routes, correlate, then build the envelope. Sink extraction
-    reads source either from a live `analyzer` (Semgrep) or from a pre-captured
-    `semgrep_payload` - the latter is what makes this testable offline.
+    reads source either from a live `analyzer` (Opengrep) or from a pre-captured
+    `opengrep_payload` - the latter is what makes this testable offline.
 
     `validate_module2_handoff` runs before the envelope is built: every ID the
     output references is checked back against the request, failing closed.
@@ -170,7 +170,7 @@ async def run_module2(
     sink_result = await aextract_sink_candidates(
         request,
         analyzer=analyzer,
-        semgrep_payload=semgrep_payload,
+        opengrep_payload=opengrep_payload,
         existing_evidence_ids={item.evidence_id for item in request.evidence_records},
     )
     route_result = extract_route_bindings(
@@ -251,7 +251,7 @@ async def run_pipeline(
     source_repo_path: str | None = None,
     target_id: str = "TGT-001",
     analyzer: AsyncSourceAnalysisPort | None = None,
-    semgrep_payload: Mapping[str, Any] | None = None,
+    opengrep_payload: Mapping[str, Any] | None = None,
 ) -> Module2CorrelationEnvelope:
     """Run M1 recon then M2 analysis end to end, returning the sealed envelope."""
     request = await collect_m1(
@@ -264,7 +264,7 @@ async def run_pipeline(
         request,
         trust_policy=trust_policy,
         analyzer=analyzer,
-        semgrep_payload=semgrep_payload,
+        opengrep_payload=opengrep_payload,
     )
 
 
