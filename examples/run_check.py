@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
         help="scope entry; repeatable. Defaults to the target itself.",
     )
     parser.add_argument("--subdomains", action="store_true", help="allow subdomains of the scope")
-    parser.add_argument("--model", default="openai:gpt-4o-mini", help="provider:model-id")
+    parser.add_argument("--model", default="openai:gpt-5", help="provider:model-id")
     parser.add_argument(
         "--trace", default="summary", choices=["off", "summary", "full"], help="trace detail"
     )

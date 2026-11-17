@@ -42,6 +42,7 @@ markers = [
     "live_agent: opt-in tests requiring an Agent model and credentials",
     "live_m1_m2: opt-in WHITEBOX M1 to M2 tests against authorized lab targets",
     "opengrep_cli: opt-in contracts requiring a local Opengrep executable",
+    "live_wstg: opt-in tests that fetch WSTG content from the official OWASP repo",
 ]
 
 [tool.ruff]
@@ -50,6 +51,10 @@ src = ["src", "mcp_servers", "examples"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# The HTML/CSS report template has long, unbreakable template lines.
+"src/websecuritycheck/tactic_planning/stage_b/handoff.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 # `_builders` is the test suite's own helper module, not a dependency.

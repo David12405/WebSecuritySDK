@@ -1,0 +1,718 @@
+{
+  "correlation": {
+    "coverage": {
+      "blocking_dependencies": [
+        "VULNERABLE_API_REGISTRY_EMPTY"
+      ],
+      "chain_enabled": false,
+      "cve_technology_enabled": false,
+      "input_sink_enabled": true,
+      "sink_cve_enabled": false
+    },
+    "diagnostics": [],
+    "limitations": [
+      "SINK_CVE_REGISTRY_EMPTY"
+    ],
+    "records": [
+      {
+        "candidate_input_names_in_handler": [],
+        "component_refs": [],
+        "confidence": "MEDIUM",
+        "confidence_caps_applied": [
+          "INDEPENDENCE_SHARED"
+        ],
+        "correlation_id": "COR-3b7c6ade60a0fcf0",
+        "cve_candidate_ref": null,
+        "endpoint_id": "6aca10a32fec",
+        "existence_evidence_refs": [
+          "EVD-002",
+          "EVD-003"
+        ],
+        "existence_observation_refs": [
+          "OBS-005"
+        ],
+        "handler_code_slice": null,
+        "independence": {
+          "distinct_execution_count": 2,
+          "reasons": [
+            "SHARED_SOURCE_SNAPSHOT:5f8c080775b4f5b5ad8b37379965f6ac1910cfb5"
+          ],
+          "status": "SHARED"
+        },
+        "independent_relation_source_count": 2,
+        "injection_subtype": "SQL_INJECTION",
+        "input_ref": "INP-011",
+        "is_confirmed_vulnerability": false,
+        "kind": "INPUT_SINK",
+        "missing_links": [],
+        "rationale": "Verified static taint flow from 6aca10a32fec parameter 'id' to sink SNK-001 (src/index.js:73)",
+        "relation_evidence_refs": [
+          "EVD-003",
+          "EVD-009"
+        ],
+        "relation_observation_refs": [],
+        "sink_ref": "SNK-001",
+        "sink_relationship": "STATIC_TAINT_FLOW_FOUND",
+        "status": "VERIFIED",
+        "target_technology": null,
+        "unverified_preconditions": [],
+        "vulnerability_category": "SQL_INJECTION"
+      },
+      {
+        "candidate_input_names_in_handler": [],
+        "component_refs": [],
+        "confidence": "MEDIUM",
+        "confidence_caps_applied": [
+          "INDEPENDENCE_SHARED"
+        ],
+        "correlation_id": "COR-e6ae7ad2b1e99494",
+        "cve_candidate_ref": null,
+        "endpoint_id": "4f3207dc5bf7",
+        "existence_evidence_refs": [
+          "EVD-002",
+          "EVD-004"
+        ],
+        "existence_observation_refs": [
+          "OBS-004"
+        ],
+        "handler_code_slice": null,
+        "independence": {
+          "distinct_execution_count": 2,
+          "reasons": [
+            "SHARED_SOURCE_SNAPSHOT:5f8c080775b4f5b5ad8b37379965f6ac1910cfb5"
+          ],
+          "status": "SHARED"
+        },
+        "independent_relation_source_count": 2,
+        "injection_subtype": "SQL_INJECTION",
+        "input_ref": "INP-010",
+        "is_confirmed_vulnerability": false,
+        "kind": "INPUT_SINK",
+        "missing_links": [],
+        "rationale": "Verified static taint flow from 4f3207dc5bf7 parameter 'keyword' to sink SNK-002 (src/index.js:125)",
+        "relation_evidence_refs": [
+          "EVD-004",
+          "EVD-007"
+        ],
+        "relation_observation_refs": [],
+        "sink_ref": "SNK-002",
+        "sink_relationship": "STATIC_TAINT_FLOW_FOUND",
+        "status": "VERIFIED",
+        "target_technology": null,
+        "unverified_preconditions": [],
+        "vulnerability_category": "SQL_INJECTION"
+      }
+    ],
+    "sink_scopes": [
+      {
+        "corroborating_cwe_ids": [
+          "CWE-89"
+        ],
+        "flow_trust": "TRUSTED_TAINT",
+        "provenance_gaps": [],
+        "reason": "Evaluated sink SNK-001: scope=ALLOWED (APPROVED_REGISTRY), provenance=VERIFIED, flow_trust=TRUSTED_TAINT",
+        "rule_provenance": "VERIFIED",
+        "scope_basis": "APPROVED_REGISTRY",
+        "scope_status": "ALLOWED",
+        "sink_id": "SNK-001",
+        "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+        "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+        "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+        "subtype": "SQL_INJECTION"
+      },
+      {
+        "corroborating_cwe_ids": [
+          "CWE-89"
+        ],
+        "flow_trust": "TRUSTED_TAINT",
+        "provenance_gaps": [],
+        "reason": "Evaluated sink SNK-002: scope=ALLOWED (APPROVED_REGISTRY), provenance=VERIFIED, flow_trust=TRUSTED_TAINT",
+        "rule_provenance": "VERIFIED",
+        "scope_basis": "APPROVED_REGISTRY",
+        "scope_status": "ALLOWED",
+        "sink_id": "SNK-002",
+        "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+        "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+        "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+        "subtype": "SQL_INJECTION"
+      }
+    ],
+    "trust_policy_fingerprint": "7dd9740f1a763a14a154e4025b252653bcf4991b5dced7b5873ea330c729c1f6",
+    "trust_policy_is_default": false,
+    "warnings": []
+  },
+  "output": {
+    "analysis_evidence_records": [
+      {
+        "artifact_ref": "opengrep-sink-snk-001",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-003",
+        "execution_ref": "EXEC-119668383268512066129777400284265623993",
+        "media_type": "application/json",
+        "metadata": {
+          "cwe_ids": [
+            "CWE-89"
+          ],
+          "end_line": 73,
+          "file_path": "src/index.js",
+          "has_static_taint_flow": true,
+          "primary_rule_id": "cloudflare-workers.tainted-d1-sql-injection",
+          "rule_ids": [
+            "cloudflare-workers.tainted-d1-sql-injection"
+          ],
+          "severities": [
+            "ERROR"
+          ],
+          "sink_id": "SNK-001",
+          "sink_kind": "SQL_QUERY",
+          "start_line": 73
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-119668383268512066129777400284265623993",
+          "ruleset": "local-approved",
+          "ruleset_path": "/mnt/d/Internship/WebSecuritySDK/tests/test_analysis/rules/cloudflare-workers-injection.yml",
+          "ruleset_ref": "cloudflare-workers-injection.yml",
+          "ruleset_sha256": "03a27ea4a9ee9b6601c2e335c0025a6213988fe288216daaa59fd3d45ce6b58d",
+          "scan_path": ".",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "tool": "opengrep",
+          "version": "1.33.1",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "edc67ff059db2d1f5d71ddea18d9545d46c1586accfacfbd439b7ec9cc5d6747",
+        "size_bytes": 1684,
+        "source_tool_id": "opengrep",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "opengrep-sink-snk-002",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-004",
+        "execution_ref": "EXEC-119668383268512066129777400284265623993",
+        "media_type": "application/json",
+        "metadata": {
+          "cwe_ids": [
+            "CWE-89"
+          ],
+          "end_line": 125,
+          "file_path": "src/index.js",
+          "has_static_taint_flow": true,
+          "primary_rule_id": "cloudflare-workers.tainted-d1-sql-injection",
+          "rule_ids": [
+            "cloudflare-workers.tainted-d1-sql-injection"
+          ],
+          "severities": [
+            "ERROR"
+          ],
+          "sink_id": "SNK-002",
+          "sink_kind": "SQL_QUERY",
+          "start_line": 125
+        },
+        "provenance": {
+          "ast_taint_provenance": {
+            "method": "ast_intraprocedural_taint_v1",
+            "method_digest": "a755ba9decda29184e167a561d19e047e707df6b28bbc56a5d273a60b09ee8ce",
+            "producer_id": "ast_intraprocedural_taint"
+          },
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-119668383268512066129777400284265623993",
+          "ruleset": "local-approved",
+          "ruleset_path": "/mnt/d/Internship/WebSecuritySDK/tests/test_analysis/rules/cloudflare-workers-injection.yml",
+          "ruleset_ref": "cloudflare-workers-injection.yml",
+          "ruleset_sha256": "03a27ea4a9ee9b6601c2e335c0025a6213988fe288216daaa59fd3d45ce6b58d",
+          "scan_path": ".",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "taint_origin": "opengrep_ast_refined",
+          "tool": "opengrep",
+          "version": "1.33.1",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "1348c33d821cd18052b39195df5eb4f568c768e3bb64419b56cb88dc8a8862a1",
+        "size_bytes": 1908,
+        "source_tool_id": "opengrep",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-144a55ccd759",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-006",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 198,
+          "endpoint_id": "144a55ccd759",
+          "file_path": "src/index.js",
+          "start_line": 151
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "38c73a3d433ad01331e34fce23dc91d27adae90ca3cafb3daa7a9f2edc7bfb87",
+        "size_bytes": 206,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-4f3207dc5bf7",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-007",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 148,
+          "endpoint_id": "4f3207dc5bf7",
+          "file_path": "src/index.js",
+          "start_line": 104
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "03e0fee41a9eb441232cb934c4358912958030fd4e0c2bc80a7dad92d29dedde",
+        "size_bytes": 206,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-5bf26076b8fd",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-008",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 213,
+          "endpoint_id": "5bf26076b8fd",
+          "file_path": "src/index.js",
+          "start_line": 201
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "7ed7e07ae1536b64d272f6f85ef497d095ee207c18d570b681092c3fb1b3cfc6",
+        "size_bytes": 210,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-6aca10a32fec",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-009",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 83,
+          "endpoint_id": "6aca10a32fec",
+          "file_path": "src/index.js",
+          "start_line": 65
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "ef856bff0b739f128b669b7c94c7d78243a156a4029133ea6d92ad066919a529",
+        "size_bytes": 202,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-79a132986b7c",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-010",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 54,
+          "endpoint_id": "79a132986b7c",
+          "file_path": "src/index.js",
+          "start_line": 46
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "8308ec29f624b046613a5ac5bc8e0dd56ee934c9650adc8a77125b81985fbc26",
+        "size_bytes": 193,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      },
+      {
+        "artifact_ref": "route-binding-7c43f96c8352",
+        "artifact_type": "SOURCE_ARTIFACT",
+        "assessment_id": "ASM-103",
+        "captured_at": "2026-11-11T08:47:51.102672Z",
+        "evidence_id": "EVD-011",
+        "execution_ref": "EXEC-154899001887310756846801777534923330000",
+        "media_type": "application/json",
+        "metadata": {
+          "end_line": 101,
+          "endpoint_id": "7c43f96c8352",
+          "file_path": "src/index.js",
+          "start_line": 87
+        },
+        "provenance": {
+          "derivation_modality": "static_source_snapshot",
+          "execution_ref": "EXEC-154899001887310756846801777534923330000",
+          "extraction_method": "cloudflare_worker_ast_v1",
+          "extraction_method_digest": "5f0a4283c00981ca8e2b2fcacda5fa6c8ef3de8d8b078b20597bf627e107cde9",
+          "source_repo_path": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_repository_ref": "/mnt/d/Internship/WebSecuritySDK/test-targets/cloudflare/targets/api",
+          "source_revision": "5f8c080775b4f5b5ad8b37379965f6ac1910cfb5",
+          "source_tree_sha256": "c34ec69868244b0de5993fa29fb0871d96fd1d67c0da00dfdb41432141980c52",
+          "worktree_dirty": true
+        },
+        "redaction_applied": false,
+        "sha256_hash": "f309ed7e0919824640a9d81bdd4beb67d2f973bb5aef3a4f46465ff82b465b43",
+        "size_bytes": 208,
+        "source_tool_id": "static_route_extractor",
+        "storage_uri": null,
+        "truncated": false
+      }
+    ],
+    "assessment_id": "ASM-103",
+    "cve_candidates": [],
+    "generated_at": "2026-11-11T08:47:56.458485Z",
+    "hypotheses": [],
+    "inputs": [
+      {
+        "data_type": "string",
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "5bf26076b8fd",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-001",
+        "location": "HEADER",
+        "observation_refs": [
+          "OBS-002"
+        ],
+        "parameter_name": "x-test-client",
+        "required": true,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-002",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "parameter_name": "productId",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-003",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "parameter_name": "quantity",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-004",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "parameter_name": "shipping",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-005",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "parameter_name": "shipping.city",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "144a55ccd759",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-006",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-003"
+        ],
+        "parameter_name": "shipping.country",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "4f3207dc5bf7",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-007",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-004"
+        ],
+        "parameter_name": "filters",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "4f3207dc5bf7",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-008",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-004"
+        ],
+        "parameter_name": "filters.category",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "4f3207dc5bf7",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-009",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-004"
+        ],
+        "parameter_name": "filters.minPrice",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": null,
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "4f3207dc5bf7",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-010",
+        "location": "JSON_BODY",
+        "observation_refs": [
+          "OBS-004"
+        ],
+        "parameter_name": "keyword",
+        "required": null,
+        "sample_value": null
+      },
+      {
+        "data_type": "integer",
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "6aca10a32fec",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-011",
+        "location": "QUERY",
+        "observation_refs": [
+          "OBS-005"
+        ],
+        "parameter_name": "id",
+        "required": false,
+        "sample_value": null
+      },
+      {
+        "data_type": "integer",
+        "discovery_sources": [
+          "API_SPEC"
+        ],
+        "endpoint_id": "7c43f96c8352",
+        "evidence_refs": [
+          "EVD-002"
+        ],
+        "input_id": "INP-012",
+        "location": "PATH",
+        "observation_refs": [
+          "OBS-006"
+        ],
+        "parameter_name": "id",
+        "required": true,
+        "sample_value": null
+      }
+    ],
+    "limitations": [
+      "LocalSeedCVEProvider is an offline MVP seed catalog with limited product and CVE coverage; zero matched CVE candidates never implies the target technology is free of known vulnerabilities.",
+      "SINK_CVE_REGISTRY_EMPTY"
+    ],
+    "schema_version": "3.0.0-m2",
+    "sink_candidates": [
+      {
+        "confidence": "HIGH",
+        "dataflow_steps": [
+          "src/index.js:69 (source: url.searchParams.get(\"id\"))",
+          "src/index.js:69 (propagator: idParam)",
+          "src/index.js:72 (propagator: sql)",
+          "src/index.js:73 (sink: db.prepare(sql))"
+        ],
+        "end_line": 73,
+        "evidence_refs": [
+          "EVD-003"
+        ],
+        "file_path": "src/index.js",
+        "has_static_taint_flow": true,
+        "observation_refs": [],
+        "rule_id": "cloudflare-workers.tainted-d1-sql-injection",
+        "sink_id": "SNK-001",
+        "sink_kind": "SQL_QUERY",
+        "snippet": "        await db.prepare(sql).all();",
+        "start_line": 73
+      },
+      {
+        "confidence": "HIGH",
+        "dataflow_steps": [
+          "src/index.js:114 (source: await request.json())",
+          "src/index.js:114 (propagator: body)",
+          "src/index.js:124 (propagator: searchSql)",
+          "src/index.js:125 (sink: db.prepare(searchSql))"
+        ],
+        "end_line": 125,
+        "evidence_refs": [
+          "EVD-004"
+        ],
+        "file_path": "src/index.js",
+        "has_static_taint_flow": true,
+        "observation_refs": [],
+        "rule_id": "cloudflare-workers.tainted-d1-sql-injection",
+        "sink_id": "SNK-002",
+        "sink_kind": "SQL_QUERY",
+        "snippet": "      await db.prepare(searchSql).all();",
+        "start_line": 125
+      }
+    ],
+    "target_id": "TGT-103",
+    "warnings": []
+  },
+  "schema_id": "websecuritycheck.m2_correlation.v1"
+}
