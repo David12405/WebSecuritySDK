@@ -77,8 +77,10 @@ from websecuritycheck.tactic_planning.stage_b.models import (
 from websecuritycheck.tactic_planning.stage_b.planner import DefaultRequestTemplateResolver
 
 ENDPOINT_ID = "a" * 12
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-REF_YAML = FIXTURES / "tactics" / "sqli_testing.reference.yaml"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = REPO_ROOT / "tests" / "fixtures"
+# The canonical SQLi reference tactic lives in the repo-root tactics/ catalog.
+REF_YAML = REPO_ROOT / "tactics" / "sqli" / "sqli_testing.yaml"
 WSTG_DIR = FIXTURES / "wstg"
 NOW = datetime(2026, 11, 16, 12, 0, 0, tzinfo=UTC)
 

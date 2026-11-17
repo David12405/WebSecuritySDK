@@ -87,7 +87,7 @@ from websecuritycheck.tactic_planning.stage_b.models import (  # noqa: E402
 
 ENDPOINT_ID = "a" * 12
 WSTG_DIR = REPO_ROOT / "tests" / "fixtures" / "wstg"
-REF_TACTIC = REPO_ROOT / "tests" / "fixtures" / "tactics" / "sqli_testing.reference.yaml"
+REF_TACTIC = REPO_ROOT / "tactics" / "sqli" / "sqli_testing.yaml"
 NOW = datetime(2026, 11, 16, 12, 0, 0, tzinfo=UTC)
 
 

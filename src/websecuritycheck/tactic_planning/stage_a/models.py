@@ -29,8 +29,12 @@ from ...domain.models import StrictModel
 
 TACTIC_SCHEMA_VERSION = "0.1.0"
 
-#: The bundled canonical JSON Schema, imported from the approved v0.1.0 input.
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "tactic.schema.json"
+#: The project's single canonical tactic JSON Schema, shared with the repo-root
+#: `tactics/` catalog (dev owns that tree). Resolved relative to the repo root;
+#: a future wheel build must ship `tactics/schemas/` as package data.
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[4] / "tactics" / "schemas" / "tactic.schema.json"
+)
 
 #: Canonical identifiers code allocates; a model never emits them.
 CANONICAL_TACTIC_ID = "TACTIC-SQLI-001"
