@@ -36,6 +36,8 @@ servers:
       # Opengrep static analysis binary and ruleset (empty falls back to L6 defaults).
       WEBSEC_OPENGREP_PATH: "${WEBSEC_OPENGREP_PATH}"
       WEBSEC_OPENGREP_RULESET: "${WEBSEC_OPENGREP_RULESET}"
+      # Constrained Module 3 validation tools (empty falls back to L6 defaults).
+      WEBSEC_SQLMAP_PATH: "${WEBSEC_SQLMAP_PATH}"
 
   # Partner's server. Fill in once the transport is agreed.
   - name: partner-websec

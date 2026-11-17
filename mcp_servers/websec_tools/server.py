@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from . import analysis as analysis_tools
 from . import probes
+from . import validation as validation_tools
 
 try:
     from . import recon as recon_tools
@@ -187,6 +188,38 @@ async def analyze_source(target: str, path: str = ".") -> dict[str, Any]:
     return await _invoke(analysis_tools.opengrep.analyze_source, target, path)
 
 
+async def detect_sqli(
+    target: str,
+    parameter_name: str,
+    parameter_location: Literal["QUERY", "FORM", "JSON_BODY", "COOKIE", "HEADER"] = "QUERY",
+    method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = "GET",
+    techniques: list[Literal["ERROR", "BOOLEAN", "UNION", "TIME"]] | None = None,
+    dbms_hint: str | None = None,
+    timeout_seconds: float = 120.0,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+    body: str | None = None,
+    sample_value: str = "1",
+) -> dict[str, Any]:
+    """Run constrained, non-destructive SQLMap detection under LOW risk profile."""
+
+    return await _invoke(
+        validation_tools.sqlmap.detect_sqli,
+        target,
+        parameter_name,
+        parameter_location=parameter_location,
+        method=method,
+        techniques=techniques,
+        dbms_hint=dbms_hint,
+        timeout_seconds=timeout_seconds,
+        risk_profile="LOW",
+        headers=headers,
+        cookies=cookies,
+        body=body,
+        sample_value=sample_value,
+    )
+
+
 TOOLS = (
     probe_http,
     get_response_headers,
@@ -206,6 +239,7 @@ TOOLS = (
     search_source,
     analyze_source,
     explore_browser,
+    detect_sqli,
 )
 
 

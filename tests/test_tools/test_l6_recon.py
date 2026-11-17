@@ -468,4 +468,5 @@ def test_server_registers_all_l6_tools():
         "search_source",
         "analyze_source",
         "explore_browser",
+        "detect_sqli",
     ]
