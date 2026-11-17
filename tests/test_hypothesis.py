@@ -108,34 +108,39 @@ def test_real_envelope_generates_guarded_hypotheses(captured):
     ) == []
 
 
-def test_real_envelope_endpoint_sink_stays_low_and_unverified(captured):
+def test_real_envelope_traced_flows_are_verified_and_capped(captured):
     output, correlation = captured
     result = generate_hypotheses(output, correlation.records)
 
-    # Every captured relation is ENDPOINT_SINK: the sink is in the handler but
-    # no flow was traced, so nothing may claim a traced flow or rise above LOW.
+    # The captured relations are traced INPUT_SINK flows: AST taint named the
+    # parameter that reaches the sink, so each hypothesis claims a verified flow,
+    # carries the relation's MEDIUM confidence (not promoted, not dropped to LOW),
+    # and has no "parameter was not traced" note. The untraced ENDPOINT_SINK case
+    # is covered by test_selected_parameter_is_capped_at_low_however_strong_the_relation.
+    assert result.hypotheses, "the captured relations should yield hypotheses"
     for hypothesis in result.hypotheses:
-        assert hypothesis.confidence == ConfidenceLevel.LOW
-        assert hypothesis.sink_relationship == SinkRelationship.UNVERIFIED_STATIC_SINK
-        assert any("dataflow" in item.lower() for item in hypothesis.missing_evidence)
+        assert hypothesis.sink_relationship == SinkRelationship.STATIC_TAINT_FLOW_FOUND
+        assert hypothesis.confidence == ConfidenceLevel.MEDIUM
+        assert not any("dataflow" in item.lower() for item in hypothesis.missing_evidence)
 
 
-def test_real_envelope_ranks_candidates_by_priority(captured):
+def test_real_envelope_traced_flows_bind_one_input_per_endpoint(captured):
     output, correlation = captured
     result = generate_hypotheses(output, correlation.records)
 
+    # Every captured relation names its own traced input, so the selector never
+    # runs and each endpoint yields exactly one candidate - there is no
+    # multi-candidate tie for priority to break in this data. The tie-breaking
+    # itself is covered by the hand-built selector tests below.
     by_endpoint: dict[str, list[int]] = {}
     for hypothesis in result.hypotheses:
         priority = hypothesis.validation_proposals[0].priority
         by_endpoint.setdefault(hypothesis.target_endpoint_id, []).append(priority)
 
-    # Where one sink produced several candidate parameters, the selector's
-    # ordering has to survive into priority or Module 3 inherits a flat tie.
-    multi = [values for values in by_endpoint.values() if len(values) > 1]
-    assert multi, "the captured data has an endpoint with several candidate inputs"
-    for values in multi:
-        assert len(set(values)) > 1, "candidates from one sink must not all tie"
-        assert values == sorted(values, reverse=True)
+    assert by_endpoint, "the captured relations should yield endpoint-scoped hypotheses"
+    for endpoint, priorities in by_endpoint.items():
+        assert len(priorities) == 1, f"a traced flow should bind one input on {endpoint}"
+        assert 1 <= priorities[0] <= 10
 
 
 # --------------------------------------------------------------------------- #
