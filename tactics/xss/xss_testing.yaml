@@ -1,0 +1,198 @@
+schema_version: "0.1.0"
+tactic_id: "TACTIC-XSS-001"
+name: "xss_testing"
+mode: "GUIDED_AGENT"
+
+scope:
+  vulnerability: "XSS"
+  supported_input_locations:
+    - "QUERY"
+    - "FORM"
+    - "HEADER"
+    - "DOM"
+  limitations:
+    - "Reflected and DOM-based XSS detection and deterministic verification only"
+    - "Excludes blind/out-of-band XSS callbacks, stored multi-step flood, and browser fuzzing"
+    - "Playwright browser verification runs deterministic canary-token hooks only"
+
+references:
+  - "WSTG-INPV-01"
+  - "WSTG-INPV-02"
+  - "WSTG-CLNT-01"
+  - "docs/CAPABILITY_CONTRACTS.md"
+  - "docs/TACTIC_SCHEMA_SPEC.md"
+
+required_context:
+  - name: "target_url"
+    source: "M1.EndpointDefinition"
+    required: true
+    description: "Authorized absolute URL assembled from EndpointDefinition.origin + path"
+  - name: "method"
+    source: "M1.EndpointDefinition"
+    required: true
+    description: "HTTP method declared for the candidate endpoint"
+  - name: "parameter_name"
+    source: "M2.InputCandidate"
+    required: true
+    description: "Target input parameter or DOM input name from InputCandidate.parameter_name"
+  - name: "parameter_location"
+    source: "M2.InputCandidate"
+    required: true
+    description: "InputLocation enum value (QUERY, FORM, HEADER, DOM)"
+  - name: "hypothesis"
+    source: "M2.Hypothesis"
+    required: true
+    description: "XSS hypothesis context, confidence, and rationale"
+  - name: "expected_signals"
+    source: "M2.ValidationCapabilityRequirement"
+    required: false
+    description: "Expected validation signals (UNENCODED_REFLECTION, DOM_EXECUTION_CONFIRMED)"
+  - name: "execution_policy"
+    source: "M1.ExecutionPolicy"
+    required: true
+    description: "Authorized scope, active testing permission, and request/time budgets"
+  - name: "request_artifact_ref"
+    source: "M1.EvidenceArtifactRecord"
+    required: false
+    description: "Opaque reference to M1 HTTP_RAW_EXCHANGE template"
+  - name: "auth_ref"
+    source: "M1.AssessmentConfig.auth_references"
+    required: false
+    description: "Opaque credential reference resolved inside Adapter when endpoint requires auth"
+
+capabilities:
+  - id: "HTTP_REQUEST"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#2-http_request"
+    role: "required"
+  - id: "XSS_DETECTION"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#4-xss_detection"
+    role: "required"
+  - id: "BROWSER_INTERACTION"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#5-browser_interaction"
+    role: "optional"
+
+safety_rules:
+  - "Never test outside explicitly authorized scope or ExecutionPolicy"
+  - "Never use external OOB/blind XSS callback servers or destructive stored payloads"
+  - "Use risk_profile=LOW and bounded max_requests/timeout_seconds"
+  - "Do not generate arbitrary LLM browser click/fill scripts; BROWSER_INTERACTION runs deterministic canary hooks only"
+  - "CONFIRMED requires verified reflection/execution proof linked to redacted evidence_refs"
+
+steps:
+  - id: "preflight"
+    goal: "Verify authorization, policy permission, supported input location, and required context"
+    recommended_capability: null
+    guidance: >-
+      Verify scope, ExecutionPolicy permission for active XSS testing, supported parameter_location
+      (QUERY, FORM, HEADER, DOM), and auth_ref before sending traffic.
+    next_options:
+      - when: "policy_denied"
+        action: "POLICY_BLOCKED"
+        reason: "Target is out of scope or active XSS testing is denied by ExecutionPolicy"
+      - when: "unsupported_input"
+        action: "UNSUPPORTED"
+        reason: "InputLocation is outside QUERY, FORM, HEADER, or DOM"
+      - when: "missing_required_context"
+        action: "INCONCLUSIVE"
+        reason: "Missing required endpoint, parameter, or auth context"
+      - when: "ready"
+        action: "baseline"
+        reason: "Preconditions satisfied; proceed to baseline HTTP verification"
+
+  - id: "baseline"
+    goal: "Establish baseline HTTP response, CSP presence, auth validity, and stability"
+    recommended_capability: "HTTP_REQUEST"
+    guidance: >-
+      Call HTTP_REQUEST (2 samples) to check baseline_ready and target_stable. If parameter_location
+      is DOM and HTTP baseline is ready, proceed directly to optional_browser_dom_verification.
+    suggested_inputs:
+      sample_count: 2
+      timeout_seconds: 15
+    next_options:
+      - when: "tool_error"
+        action: "ERROR"
+        reason: "Transport failure or tool timeout prevented baseline check"
+      - when: "not_ready_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Auth expired, rate limited, WAF blocked, or target unstable"
+      - when: "dom_input_ready"
+        action: "optional_browser_dom_verification"
+        reason: "DOM InputLocation requires browser execution verification directly"
+      - when: "baseline_ready"
+        action: "primary_http_xss_detection"
+        reason: "HTTP baseline ready; run Dalfox-backed XSS_DETECTION"
+
+  - id: "primary_http_xss_detection"
+    goal: "Run tool-managed HTTP reflection, context encoding, and PoC detection via Dalfox"
+    recommended_capability: "XSS_DETECTION"
+    optional: true
+    guidance: >-
+      Call XSS_DETECTION for QUERY, FORM, or HEADER parameters. Inspect reflection_detected,
+      reflection_contexts, unencoded_chars, csp_observed, and needs_browser_verification.
+    suggested_inputs:
+      risk_profile: "LOW"
+      max_requests: 150
+      timeout_seconds: 120
+    next_options:
+      - when: "verified_proof_no_browser_needed"
+        action: "finalize"
+        reason: "XSS confirmed with verified HTTP proof and no browser verification needed"
+      - when: "needs_browser_verification"
+        action: "optional_browser_dom_verification"
+        reason: "Reflection or candidate PoC needs Playwright JS execution check (e.g. CSP or complex context)"
+      - when: "not_reflected_or_encoded"
+        action: "finalize"
+        reason: "Completed cleanly without unencoded reflection in tested scope"
+      - when: "interrupted_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Rate limit, auth failure, or WAF interrupted XSS detection"
+
+  - id: "optional_browser_dom_verification"
+    goal: "Deterministically verify real JS execution using Playwright canary_token hook"
+    recommended_capability: "BROWSER_INTERACTION"
+    optional: true
+    guidance: >-
+      Run only after primary_http_xss_detection (when needs_browser_verification=true) or directly
+      for DOM inputs. Pass parameter_name, parameter_location, and candidate_payload_ref if present.
+    suggested_inputs:
+      timeout_seconds: 30
+    next_options:
+      - when: "matched_canary_token"
+        action: "finalize"
+        reason: "Playwright confirmed canary_token JS execution"
+      - when: "csp_blocked_or_not_executed"
+        action: "finalize"
+        reason: "Browser rendered input without JS execution or CSP blocked execution"
+      - when: "browser_error"
+        action: "INCONCLUSIVE"
+        reason: "Browser execution failed or timed out; cannot confirm DOM execution"
+
+  - id: "finalize"
+    goal: "Cross-check proof invariants and produce final assessment outcome"
+    recommended_capability: null
+    guidance: >-
+      Verify proofs[].verified, reflection/canary execution evidence, CSP observations, and redaction.
+    next_options:
+      - when: "verified_xss_proof_and_valid_evidence"
+        action: "CONFIRMED"
+        reason: "Verified unencoded executable reflection or matched_canary_token execution with evidence"
+      - when: "heuristic_or_missing_evidence_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Reflection signal inconclusive, CSP ambiguous, or evidence missing"
+      - when: "completed_cleanly_without_proof"
+        action: "NOT_CONFIRMED"
+        reason: "Tested inputs did not produce executable XSS within tested scope"
+
+outcomes:
+  - "CONFIRMED"
+  - "NOT_CONFIRMED"
+  - "INCONCLUSIVE"
+  - "ERROR"
+  - "UNSUPPORTED"
+  - "POLICY_BLOCKED"
+
+confirmation_rules:
+  - "Reflection of benign text alone without unencoded executable context or JS execution is insufficient"
+  - "HTTP XSS requires verified unencoded payload in an executable HTML/Attr/Script context with redacted evidence"
+  - "Browser XSS requires matched_canary_token=true from deterministic Playwright hook with redacted trace evidence"
+  - "If CSP blocked execution in browser, do not mark CONFIRMED"

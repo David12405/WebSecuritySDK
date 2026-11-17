@@ -37,6 +37,7 @@ def update_target_model(
     *,
     endpoint_updates: list[EndpointDefinition] | None = None,
     technology_updates: list[TechnologyRecord] | None = None,
+    assessment: AssessmentConfig | None = None,
     assets: list[str] | None = None,
     now: datetime | None = None,
 ) -> tuple[TargetModel, bool]:
@@ -55,10 +56,12 @@ def update_target_model(
     )
     technologies = normalize_technologies(technology_updates or [], existing=current.technologies)
     next_assets = sorted(set(current.assets + (assets or [])))
+    next_scope_rules = assessment if assessment is not None else current.scope_rules
     changed = (
         endpoints != current.endpoints
         or technologies != current.technologies
         or next_assets != current.assets
+        or next_scope_rules != current.scope_rules
     )
     if not changed:
         return current, False
@@ -66,6 +69,7 @@ def update_target_model(
     updated.endpoints = endpoints
     updated.technologies = technologies
     updated.assets = next_assets
+    updated.scope_rules = next_scope_rules
     updated.revision += 1
     updated.last_updated = now or datetime.now(UTC)
     return updated, True

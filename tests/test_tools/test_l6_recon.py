@@ -291,11 +291,15 @@ async def test_zap_proxy_capture_is_bounded_scoped_redacted_and_spider_free(monk
         "https://example.com/profile",
     ]
     assert result["data"]["messages"][0]["query_parameter_names"] == ["token"]
+    assert result["data"]["messages"][0]["request_content_type"] == "application/json"
     assert result["data"]["messages"][0]["body_parameter_names"] == [
         "password",
         "user",
         "user.id",
     ]
+    assert result["data"]["messages"][1]["request_content_type"] == (
+        "application/x-www-form-urlencoded"
+    )
     assert result["data"]["excluded_message_count"] == 1
     assert result["data"]["artifact_manifests"][0]["redaction_applied"] is True
     assert not any("spider" in path for path, _params in calls)
@@ -394,7 +398,54 @@ async def test_zap_proxy_capture_retries_api_errors_and_counts_overflow(monkeypa
     assert result["data"]["captured_message_count"] == 1
     assert result["data"]["dropped_message_count"] == 2
     assert result["truncated"] is True
+    assert "incomplete:" in result["summary"]
+    manifest_meta = result["data"]["artifact_manifests"][0]["metadata"]
+    assert manifest_meta["incomplete_capture"] is True
+    assert manifest_meta["overflow_message_count"] == 2
+    assert manifest_meta["limitations"]
     assert capture_ref not in zap._CAPTURES
+
+
+@async_test
+async def test_zap_proxy_capture_tail_bounds_and_reports_short_pagination(monkeypatch):
+    zap._CAPTURES.clear()
+    monkeypatch.setattr(zap, "MAX_PROXY_MESSAGES", 2)
+    seen_starts = []
+    count_calls = 0
+
+    async def requester(path, params):
+        nonlocal count_calls
+        if path.endswith("numberOfMessages/"):
+            count_calls += 1
+            return {"numberOfMessages": "0" if count_calls == 1 else "5"}
+        if path.endswith("messages/"):
+            seen_starts.append(int(params["start"]))
+            return {
+                "messages": [
+                    {
+                        "requestHeader": "GET https://example.com/recent HTTP/1.1\r\n",
+                        "responseHeader": "HTTP/1.1 200 OK\r\n",
+                    }
+                ]
+            }
+        raise AssertionError(path)
+
+    boundary = await zap.begin_proxy_capture(
+        "https://example.com", base_url="http://zap.invalid", requester=requester
+    )
+    result = await zap.collect_proxy_traffic(
+        "https://example.com",
+        boundary["data"]["capture_ref"],
+        base_url="http://zap.invalid",
+        requester=requester,
+    )
+    assert seen_starts == [3]
+    assert result["truncated"] is True
+    assert result["data"]["dropped_message_count"] == 4
+    manifest_meta = result["data"]["artifact_manifests"][0]["metadata"]
+    assert manifest_meta["overflow_message_count"] == 3
+    assert manifest_meta["missing_fetched_messages"] == 1
+    assert len(manifest_meta["limitations"]) == 2
 
 
 def test_server_registers_all_l6_tools():
