@@ -35,6 +35,7 @@ from .planner import (
     StrandsPlanner,
     prompt_for,
 )
+from .report import format_test_plan
 from .validation import assemble_plan, validate_plan
 
 __all__ = [
@@ -61,6 +62,7 @@ __all__ = [
     "TestCaseDraft",
     "TestPlanDraft",
     "assemble_plan",
+    "format_test_plan",
     "prepare_sql_injection_plan",
     "prompt_for",
     "validate_plan",

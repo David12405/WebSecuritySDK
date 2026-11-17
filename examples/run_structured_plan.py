@@ -77,6 +77,7 @@ from websecuritycheck.tactic_planning.stage_a import (  # noqa: E402
 )
 from websecuritycheck.tactic_planning.stage_b import (  # noqa: E402
     StrandsPlanner,
+    format_test_plan,
     prepare_sql_injection_plan,
 )
 from websecuritycheck.tactic_planning.stage_b.models import (  # noqa: E402
@@ -322,18 +323,7 @@ def print_result(result, *, label: str = "") -> None:
     if plan is None:
         print("  (no plan produced)")
         return
-    print(f"  admitted {plan.plan_id} for {plan.hypothesis_ref} "
-          f"(tactic {plan.tactic_ref.tactic_id} v{plan.tactic_ref.tactic_version})")
-    print(f"  target: {plan.target_binding.endpoint_ref} / {plan.target_binding.input_ref} "
-          f"via {plan.target_binding.request_template_ref}")
-    print(f"  limits: {plan.execution_limits.aggregate_max_requests} requests aggregate")
-    for case in plan.test_cases:
-        technique = case.technique.value if case.technique else "-"
-        deps = ", ".join(case.dependencies) or "none"
-        flag = " (optional)" if case.optional else ""
-        print(f"  {case.test_case_id}{flag}: {case.capability_id}/{technique} "
-              f"step={case.tactic_step_ref} deps=[{deps}] budget={case.max_requests}")
-        print(f"      {case.purpose}")
+    print(format_test_plan(plan))
 
 
 def main() -> int:

@@ -60,6 +60,7 @@ from websecuritycheck.tactic_planning.stage_b import (
     FakePlanner,
     PlanningStatus,
     StrandsPlanner,
+    format_test_plan,
     prepare_sql_injection_plan,
 )
 
@@ -179,10 +180,7 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
         assert plan.target_binding.input_ref == hypothesis.input_ref
         assert plan.test_cases
         planned += 1
-        print(
-            f"[source->plan] {hypothesis.hypothesis_id} {hypothesis.input_ref} "
-            f"-> {plan.plan_id} ({len(plan.test_cases)} test cases, "
-            f"tactic {plan.tactic_ref.tactic_version})"
-        )
+        print(f"\n[source->plan] {hypothesis.hypothesis_id} ({hypothesis.input_ref}):")
+        print(format_test_plan(plan))
 
     assert planned == len(sqli)
