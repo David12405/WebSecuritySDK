@@ -238,7 +238,7 @@ def make_scope_rules(
     return AssessmentConfig(
         assessment_id=Id(assessment_id),
         target=target,  # type: ignore[arg-type]
-        authorized_scope=authorized_scope or ["shop.lab.local"],
+        authorized_scope=authorized_scope or ["https://shop.lab.local"],
         scope_approval=ScopeApprovalRecord(
             is_approved=True,
             approved_by="Security Lead",

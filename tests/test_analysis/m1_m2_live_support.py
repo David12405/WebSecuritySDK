@@ -253,13 +253,14 @@ def assert_source_contract(case: TargetCase) -> list[str]:
 
 
 def assessment(case: TargetCase) -> AssessmentConfig:
-    hostname = urlsplit(case.url).hostname
-    assert hostname is not None
+    parsed = urlsplit(case.url)
+    assert parsed.scheme and parsed.netloc
+    origin = f"{parsed.scheme}://{parsed.netloc}"
     signature = hashlib.sha256(f"{case.url}|{case.source_root.resolve()}".encode()).hexdigest()
     return AssessmentConfig(
         assessment_id=case.assessment_id,
         target=case.url,
-        authorized_scope=[hostname],
+        authorized_scope=[origin],
         scope_approval=ScopeApprovalRecord(
             is_approved=True,
             approved_by="live-whitebox-integration-test",
