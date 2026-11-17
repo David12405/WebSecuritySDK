@@ -14,6 +14,7 @@
 # Reports produced by a local run
 report.json
 *.sarif
+source_to_plan_report.html
 
 # Python
 __pycache__/
