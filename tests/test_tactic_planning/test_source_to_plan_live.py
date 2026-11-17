@@ -15,11 +15,13 @@ and the official OWASP WSTG source over the network. Set WEBSEC_PLAN_LLM=0 and
 WEBSEC_WSTG_SOURCE=recorded for a deterministic, offline, no-cost run. The LLM
 path skips (not fails) when no API key is configured.
 
-Run (from the repo root, inside WSL; needs `openai` installed in the interpreter):
+Run (from the repo root, inside WSL; needs `openai` installed in the interpreter).
+Set WEBSEC_REPORT_PATH to also emit a printable HTML report of every plan:
 
     RUN_LIVE_M1_M2=1 \
     WEBSEC_OPENGREP_PATH=opengrep \
     WEBSEC_OPENGREP_RULESET="$(pwd)/tests/test_analysis/rules/cloudflare-workers-injection.yml" \
+    WEBSEC_REPORT_PATH="$(pwd)/source_to_plan_report.html" \
     python -m pytest tests/test_tactic_planning/test_source_to_plan_live.py -s
 
 Without RUN_LIVE_M1_M2 it skips, so the default offline suite is unaffected.
@@ -60,8 +62,10 @@ from websecuritycheck.tactic_planning.stage_b import (
     FakePlanner,
     PlanningStatus,
     StrandsPlanner,
+    build_m3_handoff,
     format_test_plan,
     prepare_sql_injection_plan,
+    render_report_html,
 )
 
 from ._factories import (
@@ -157,7 +161,7 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
     print(f"[source->plan] author/planner={'gpt-4o' if use_llm else 'deterministic'}, "
           f"wstg={wstg_source}")
 
-    planned = 0
+    handoffs = []
     for hypothesis in sqli:
         result = prepare_sql_injection_plan(
             generation,
@@ -179,8 +183,20 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
         assert plan is not None
         assert plan.target_binding.input_ref == hypothesis.input_ref
         assert plan.test_cases
-        planned += 1
+        handoffs.append(
+            build_m3_handoff(plan, envelope=envelope, request=request, hypothesis=hypothesis)
+        )
         print(f"\n[source->plan] {hypothesis.hypothesis_id} ({hypothesis.input_ref}):")
         print(format_test_plan(plan))
 
-    assert planned == len(sqli)
+    assert len(handoffs) == len(sqli)
+
+    # Full live run -> a printable HTML report for review, when a path is given.
+    report_path = os.getenv("WEBSEC_REPORT_PATH")
+    if report_path:
+        scope = request.target_model.scope_rules
+        html = render_report_html(
+            handoffs, target=str(scope.target) if scope else None
+        )
+        Path(report_path).write_text(html, encoding="utf-8")
+        print(f"\n[source->plan] wrote HTML report for {len(handoffs)} plan(s) to {report_path}")
