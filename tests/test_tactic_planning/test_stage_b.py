@@ -16,7 +16,9 @@ from websecuritycheck.tactic_planning.stage_b import (
     FakePlanner,
     PlanningStatus,
     assemble_plan,
+    build_m3_handoff,
     prepare_sql_injection_plan,
+    render_report_html,
     validate_plan,
 )
 from websecuritycheck.tactic_planning.stage_b.models import (
@@ -273,3 +275,47 @@ def test_planner_cannot_fabricate_target_binding():
     assert plan.target_binding.input_ref == context.input_candidate.input_id
     assert plan.target_binding.endpoint_ref == context.endpoint.endpoint_id
     assert plan.target_binding.request_template_ref == context.request_template.request_template_ref
+
+
+# --------------------------------------------------------------------------- #
+# Module 3 hand-off: resolve opaque refs + render the report
+# --------------------------------------------------------------------------- #
+
+
+def test_m3_handoff_resolves_opaque_refs():
+    fx = sqli_m2()
+    result = prepare_sql_injection_plan(
+        fx.generation, fx.hypothesis_id, fx.envelope, fx.request, **_coordinator_kwargs()
+    )
+    assert result.status == PlanningStatus.READY
+    hypothesis = fx.generation.hypotheses[0]
+    bundle = build_m3_handoff(
+        result.plan, envelope=fx.envelope, request=fx.request, hypothesis=hypothesis
+    )
+    target = bundle["resolved_target"]
+    # The opaque plan refs resolve to the real endpoint, parameter, and source line.
+    assert target["endpoint"]["url"] == "https://lab.example.com/api/search"
+    assert target["endpoint"]["method"] == "GET"
+    assert target["input"]["parameter"] == "id"
+    assert target["sink"]["file"] == "app/db.py"
+    assert target["sink"]["line"] == 10
+    # Credentials stay opaque, not resolved into the bundle.
+    assert target["request_template_ref"].startswith("REQTPL-")
+
+
+def test_m3_report_html_embeds_resolved_values():
+    fx = sqli_m2()
+    result = prepare_sql_injection_plan(
+        fx.generation, fx.hypothesis_id, fx.envelope, fx.request, **_coordinator_kwargs()
+    )
+    bundle = build_m3_handoff(
+        result.plan,
+        envelope=fx.envelope,
+        request=fx.request,
+        hypothesis=fx.generation.hypotheses[0],
+    )
+    html = render_report_html([bundle], target="https://lab.example.com")
+    assert "<!doctype html>" in html.lower()
+    assert "app/db.py:10" in html
+    assert "/api/search" in html
+    assert "SQLI_DETECTION" in html

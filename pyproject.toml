@@ -52,6 +52,10 @@ src = ["src", "mcp_servers", "examples"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# The HTML/CSS report template has long, unbreakable template lines.
+"src/websecuritycheck/tactic_planning/stage_b/handoff.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 # `_builders` is the test suite's own helper module, not a dependency.
 known-first-party = ["websecuritycheck", "mcp_servers", "_builders"]

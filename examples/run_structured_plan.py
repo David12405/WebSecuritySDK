@@ -77,8 +77,10 @@ from websecuritycheck.tactic_planning.stage_a import (  # noqa: E402
 )
 from websecuritycheck.tactic_planning.stage_b import (  # noqa: E402
     StrandsPlanner,
+    build_m3_handoff,
     format_test_plan,
     prepare_sql_injection_plan,
+    render_report_html,
 )
 from websecuritycheck.tactic_planning.stage_b.models import (  # noqa: E402
     StopCondition,
@@ -282,7 +284,16 @@ def parse_args() -> argparse.Namespace:
         help="recorded: bundled offline snapshot (default); github: fetch the "
         "canonical document live from the official OWASP WSTG repo (tag v4.2)",
     )
-    parser.add_argument("--json", dest="json_path", help="write the admitted plan(s) to this file")
+    parser.add_argument(
+        "--json",
+        dest="json_path",
+        help="write the Module 3 hand-off bundle(s) (plan + resolved target) to this JSON file",
+    )
+    parser.add_argument(
+        "--report",
+        dest="report_path",
+        help="write a printable HTML report (plan + resolved endpoint/parameter/source)",
+    )
     return parser.parse_args()
 
 
@@ -370,6 +381,7 @@ def main() -> int:
     else:
         adapter = RecordedWstgAdapter(WSTG_DIR)
     plans = []
+    handoffs = []
     for hypothesis in sqli:
         result = prepare_sql_injection_plan(
             generation,
@@ -389,14 +401,25 @@ def main() -> int:
         print_result(result, label=label)
         if result.plan is not None:
             plans.append(result.plan)
+            handoffs.append(
+                build_m3_handoff(
+                    result.plan, envelope=envelope, request=request, hypothesis=hypothesis
+                )
+            )
 
-    if args.json_path and plans:
+    if args.json_path and handoffs:
         Path(args.json_path).write_text(
-            json.dumps([p.model_dump(mode="json") for p in plans], indent=2, ensure_ascii=False)
-            + "\n",
+            json.dumps(handoffs, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        print(f"\nwrote {len(plans)} plan(s) to {args.json_path}")
+        print(f"\nwrote {len(handoffs)} hand-off bundle(s) to {args.json_path}")
+
+    if args.report_path and handoffs:
+        scope_rules = request.target_model.scope_rules
+        target = str(scope_rules.target) if scope_rules else None
+        html = render_report_html(handoffs, target=target)
+        Path(args.report_path).write_text(html, encoding="utf-8")
+        print(f"\nwrote an HTML report for {len(handoffs)} plan(s) to {args.report_path}")
     return 0 if plans else 1
 
 

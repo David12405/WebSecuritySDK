@@ -8,6 +8,7 @@ explaining why no plan was produced.
 from __future__ import annotations
 
 from .coordinator import prepare_sql_injection_plan
+from .handoff import build_m3_handoff, render_report_html
 from .models import (
     ExecutionLimits,
     GuardedHypothesisContext,
@@ -62,8 +63,10 @@ __all__ = [
     "TestCaseDraft",
     "TestPlanDraft",
     "assemble_plan",
+    "build_m3_handoff",
     "format_test_plan",
     "prepare_sql_injection_plan",
     "prompt_for",
+    "render_report_html",
     "validate_plan",
 ]
