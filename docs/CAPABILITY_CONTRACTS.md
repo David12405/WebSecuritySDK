@@ -107,7 +107,107 @@ Thực hiện dò tìm và xác minh lỗ hổng SQL Injection cùng DBMS finger
 
 ---
 
-## 4. Invariants (Bất biến Bắt buộc)
+## 4. `XSS_DETECTION`
+
+Thực hiện dò tìm phản chiếu (reflection) qua HTTP, phân tích ngữ cảnh (`HTML_TEXT`, `HTML_ATTR`, `SCRIPT_STRING`, `URL_ATTR`), kiểm tra bộ lọc ký tự và đề xuất PoC XSS không phá hoại thông qua công cụ nền (**Dalfox**).
+
+### Input (`XSS_DETECTION`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa & Ràng buộc |
+|---|---|---|---|
+| `request_artifact_ref` | `opaque_ref \| null` | Không | Tham chiếu HTTP request mẫu từ M1/baseline. |
+| `target_url` | `string` | Có | URL đích đã kiểm tra scope. |
+| `method` | `string` | Có | HTTP method (`GET`, `POST`, ...). |
+| `parameter_name` | `string` | Có | Tên tham số mục tiêu (`M2.InputCandidate.parameter_name`). |
+| `parameter_location` | `enum` | Có | `QUERY \| FORM \| HEADER`. |
+| `auth_ref` | `opaque_ref \| null` | Không | Tham chiếu xác thực, giải mã nội bộ bên trong Adapter. |
+| `baseline_artifact_refs` | `array[opaque_ref]` | Có | Bằng chứng baseline từ `HTTP_REQUEST`. |
+| `max_requests` | `integer` | Có | Ngân sách HTTP requests tối đa. |
+| `timeout_seconds` | `integer` | Có | Giới hạn thời gian tối đa. |
+| `risk_profile` | `enum` | Có | Bắt buộc `LOW` trong v0.1 (cấm `--blind` external callback, `--mining-dict`). |
+
+### Output (`XSS_DETECTION`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa |
+|---|---|---|---|
+| `execution_status` | `enum` | Có | `COMPLETED \| FAILED \| TIMEOUT \| CANCELLED`. |
+| `detection_status` | `enum` | Có | `CONFIRMED \| NOT_DETECTED \| HEURISTIC_ONLY \| INCONCLUSIVE`. |
+| `reflection_detected` | `boolean` | Có | `true` nếu canary lành tính phản chiếu trong HTTP response. |
+| `reflection_contexts` | `array[enum]` | Có | Tập con của `HTML_TEXT \| HTML_ATTR \| SCRIPT_STRING \| URL_ATTR \| STYLE \| UNKNOWN`. |
+| `unencoded_chars` | `array[string]` | Có | Các ký tự nguy hiểm không bị encode (ví dụ `<`, `>`, `"`, `'`). |
+| `csp_observed` | `boolean \| null` | Có | Có header `Content-Security-Policy` hay không. |
+| `needs_browser_verification` | `boolean` | Có | `true` khi cần Playwright xác minh JS thực sự chạy (ví dụ có CSP hoặc ngữ cảnh phức tạp). |
+| `proofs` | `array[XSSProof]` | Có | Danh sách bằng chứng (`verified=true` chỉ khi có PoC không bị encode trong ngữ cảnh thực thi). |
+| `artifact_refs` | `array[opaque_ref]` | Có | Tham chiếu tới log Dalfox và HTTP exchange đã redact. |
+| `error_code` | `string \| null` | Có | Mã lỗi kỹ thuật khi không hoàn tất. |
+
+---
+
+## 5. `BROWSER_INTERACTION`
+
+Xác minh thực thi JavaScript thật trong trình duyệt không đầu (**Playwright**) bằng kịch bản tất định và hook lắng nghe `canary_token` (không để LLM tự sinh chuỗi thao tác click/gõ phím). Dùng cho `InputLocation.DOM` hoặc khi `XSS_DETECTION` yêu cầu xác minh trình duyệt.
+
+### Input (`BROWSER_INTERACTION`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa & Ràng buộc |
+|---|---|---|---|
+| `target_url` | `string` | Có | URL đích đã kiểm tra scope. |
+| `method` | `string` | Có | HTTP method (`GET`, `POST`). |
+| `parameter_name` | `string` | Có | Tên tham số / DOM input đích. |
+| `parameter_location` | `enum` | Có | `QUERY \| FORM \| DOM`. |
+| `auth_ref` | `opaque_ref \| null` | Không | Tham chiếu xác thực. |
+| `canary_token` | `string` | Có | Chuỗi ngẫu nhiên duy nhất do Adapter/Executor sinh để đối khớp callback JS. |
+| `candidate_payload_ref` | `opaque_ref \| null` | Không | Tham chiếu tới payload PoC từ `XSS_DETECTION` (nếu có). |
+| `timeout_seconds` | `integer` | Có | Thời gian chờ tối đa (mặc định `30s`). |
+
+### Output (`BROWSER_INTERACTION`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa |
+|---|---|---|---|
+| `execution_status` | `enum` | Có | `COMPLETED \| FAILED \| TIMEOUT \| CANCELLED`. |
+| `js_execution_confirmed` | `boolean` | Có | `true` khi callback JS thực sự kích hoạt trong trình duyệt. |
+| `matched_canary_token` | `boolean` | Có | `true` chỉ khi callback nhận được khớp chính xác `canary_token` đã gửi. |
+| `execution_sink` | `string \| null` | Có | Ngữ cảnh/sink thực thi quan sát được (ví dụ `script`, `onerror_attr`, `dom_innerHTML`). |
+| `csp_blocked` | `boolean \| null` | Có | `true` nếu trình duyệt ghi nhận CSP chặn thực thi script. |
+| `proofs` | `array[XSSProof]` | Có | Bằng chứng xác minh (`verified=true` chỉ khi `matched_canary_token == true`). |
+| `artifact_refs` | `array[opaque_ref]` | Có | Tham chiếu tới `BROWSER_TRACE` / DOM snapshot đã redact. |
+| `error_code` | `string \| null` | Có | Mã lỗi kỹ thuật khi không hoàn tất. |
+
+---
+
+## 6. `CVE_SAFE_CHECK`
+
+Chạy kiểm chứng không phá hoại các `KNOWN_CVE` bằng danh sách template offline đã được phê duyệt (**Nuclei**). *(Ghi chú mở rộng: trong tương lai có thể dùng Nuclei cho `SSTI_DETECTION` / `CMDI_DETECTION` ở mức template-check an toàn).*
+
+### Input (`CVE_SAFE_CHECK`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa & Ràng buộc |
+|---|---|---|---|
+| `target_url` | `string` | Có | URL đích đã kiểm tra scope. |
+| `cve_id` | `string \| null` | Không | Mã CVE mục tiêu (`CVE-YYYY-NNNN`) từ `M2.CVECandidate`. |
+| `technology_name` | `string \| null` | Không | Tên công nghệ từ `M1.TechnologyRecord`. |
+| `technology_version` | `string \| null` | Không | Phiên bản công nghệ (nếu có). |
+| `template_allowlist_refs` | `array[opaque_ref]` | Có | Danh sách template offline đã kiểm duyệt; cấm tải template từ xa, cấm `interactsh`/OOB và DoS templates. |
+| `auth_ref` | `opaque_ref \| null` | Không | Tham chiếu xác thực. |
+| `max_requests` | `integer` | Có | Ngân sách HTTP requests tối đa. |
+| `timeout_seconds` | `integer` | Có | Giới hạn thời gian tối đa. |
+| `risk_profile` | `enum` | Có | Bắt buộc `LOW` trong v0.1. |
+
+### Output (`CVE_SAFE_CHECK`)
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa |
+|---|---|---|---|
+| `execution_status` | `enum` | Có | `COMPLETED \| FAILED \| TIMEOUT \| CANCELLED`. |
+| `detection_status` | `enum` | Có | `CONFIRMED \| NOT_DETECTED \| HEURISTIC_ONLY \| INCONCLUSIVE`. |
+| `matched_template_ids` | `array[string]` | Có | Danh sách template IDs khớp thành công. |
+| `matcher_names` | `array[string]` | Có | Tên các matcher đã khớp trong template. |
+| `proofs` | `array[TemplateProof]` | Có | Bằng chứng khớp template kèm `evidence_refs` đã redact. |
+| `artifact_refs` | `array[opaque_ref]` | Có | Tham chiếu tới output Nuclei và HTTP exchange đã redact. |
+| `error_code` | `string \| null` | Có | Mã lỗi kỹ thuật khi không hoàn tất. |
+
+---
+
+## 7. Invariants (Bất biến Bắt buộc)
 
 1. **`CONFIRMED` phải có chứng minh đa tầng**: `detection_status == "CONFIRMED"` chỉ hợp lệ khi `execution_status == "COMPLETED"`, `confirmed_techniques` không rỗng, và mỗi kỹ thuật trong `confirmed_techniques` đều có `SQLiProof` tương ứng với `verified == true`, `evidence_refs` khác rỗng, và có đủ `control_observation_refs` + `test_observation_refs`.
 2. **Cấm suy diễn từ Heuristic**: `HEURISTIC_ONLY` hoặc `heuristic_signal_detected == true` không bao giờ tự động sinh ra `CONFIRMED`; nếu không thể xác minh kỹ thuật cụ thể, kết quả cuối cùng phải là `INCONCLUSIVE`.

@@ -1,0 +1,147 @@
+schema_version: "0.1.0"
+tactic_id: "TACTIC-CVE-001"
+name: "cve_safe_check"
+mode: "GUIDED_AGENT"
+
+scope:
+  vulnerability: "KNOWN_CVE"
+  supported_input_locations:
+    - "QUERY"
+    - "FORM"
+    - "JSON_BODY"
+    - "HEADER"
+    - "PATH"
+  limitations:
+    - "Non-destructive offline-allowlisted Nuclei template verification for KNOWN_CVE only"
+    - "Excludes unapproved remote templates, interactsh/OOB callbacks, DoS, fuzzing, and headless spray"
+
+references:
+  - "WSTG-INFO-08"
+  - "docs/CAPABILITY_CONTRACTS.md"
+  - "docs/TACTIC_SCHEMA_SPEC.md"
+
+required_context:
+  - name: "target_url"
+    source: "M1.EndpointDefinition"
+    required: true
+    description: "Authorized target URL in scope"
+  - name: "cve_id"
+    source: "M2.CVECandidate"
+    required: false
+    description: "Candidate CVE identifier (CVE-YYYY-NNNN) from Module 2"
+  - name: "target_technology"
+    source: "M2.CVECandidate"
+    required: false
+    description: "Versioned TechnologyTargetRef associated with the candidate CVE"
+  - name: "hypothesis"
+    source: "M2.Hypothesis"
+    required: true
+    description: "KNOWN_CVE hypothesis context and confidence"
+  - name: "execution_policy"
+    source: "M1.ExecutionPolicy"
+    required: true
+    description: "Authorized scope and active check policy"
+  - name: "auth_ref"
+    source: "M1.AssessmentConfig.auth_references"
+    required: false
+    description: "Opaque credential reference resolved inside Adapter if needed"
+
+capabilities:
+  - id: "HTTP_REQUEST"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#2-http_request"
+    role: "required"
+  - id: "CVE_SAFE_CHECK"
+    contract_ref: "docs/CAPABILITY_CONTRACTS.md#6-cve_safe_check"
+    role: "required"
+
+safety_rules:
+  - "Only execute offline-approved templates matching template_allowlist_refs"
+  - "Never enable interactsh/OOB callbacks, DoS templates, or broad uncalibrated severity sprays"
+  - "Use risk_profile=LOW and bounded max_requests/timeout_seconds"
+  - "CONFIRMED requires matched template proof with verified=true and redacted evidence_refs"
+
+steps:
+  - id: "preflight"
+    goal: "Verify authorization, policy permission, and offline template allowlist availability"
+    recommended_capability: null
+    guidance: >-
+      Check authorized scope, ExecutionPolicy permission, and confirm that an approved offline
+      template exists for the target CVE or technology before sending requests.
+    next_options:
+      - when: "policy_denied"
+        action: "POLICY_BLOCKED"
+        reason: "Target is out of scope or active CVE checks are denied by ExecutionPolicy"
+      - when: "no_approved_template"
+        action: "UNSUPPORTED"
+        reason: "No offline-approved safe template exists for this CVE/technology"
+      - when: "ready"
+        action: "baseline"
+        reason: "Proceed to baseline HTTP reachability check"
+
+  - id: "baseline"
+    goal: "Confirm target reachability and auth validity before template check"
+    recommended_capability: "HTTP_REQUEST"
+    guidance: >-
+      Call HTTP_REQUEST (1-2 samples) to verify the target responds cleanly and is not rate-limited.
+    suggested_inputs:
+      sample_count: 1
+      timeout_seconds: 15
+    next_options:
+      - when: "tool_error"
+        action: "ERROR"
+        reason: "Transport or timeout error during baseline check"
+      - when: "not_ready_or_blocked"
+        action: "INCONCLUSIVE"
+        reason: "Auth failure, rate limit, or WAF blocked baseline request"
+      - when: "baseline_ready"
+        action: "safe_template_verification"
+        reason: "Target reachable; proceed to allowlisted Nuclei verification"
+
+  - id: "safe_template_verification"
+    goal: "Run allowlisted offline Nuclei template check under LOW risk profile"
+    recommended_capability: "CVE_SAFE_CHECK"
+    guidance: >-
+      Invoke CVE_SAFE_CHECK passing target_url, cve_id/technology metadata, and template_allowlist_refs.
+    suggested_inputs:
+      risk_profile: "LOW"
+      max_requests: 50
+      timeout_seconds: 60
+    next_options:
+      - when: "template_matched_with_proof"
+        action: "finalize"
+        reason: "Allowlisted template matched; verify proof invariants"
+      - when: "not_detected"
+        action: "finalize"
+        reason: "Allowlisted templates completed cleanly with no match"
+      - when: "interrupted_or_error"
+        action: "INCONCLUSIVE"
+        reason: "Rate limit, auth barrier, or template error prevented verification"
+
+  - id: "finalize"
+    goal: "Evaluate template proof and evidence invariants"
+    recommended_capability: null
+    guidance: >-
+      Confirm only when matched_template_ids is non-empty, proof verified=true, and redacted
+      evidence_refs are attached.
+    next_options:
+      - when: "verified_template_proof"
+        action: "CONFIRMED"
+        reason: "Allowlisted Nuclei template matched with verified proof and redacted evidence"
+      - when: "missing_evidence_or_ambiguous"
+        action: "INCONCLUSIVE"
+        reason: "Template match lacked verified proof or redacted evidence"
+      - when: "completed_without_match"
+        action: "NOT_CONFIRMED"
+        reason: "Allowlisted templates completed cleanly without matching"
+
+outcomes:
+  - "CONFIRMED"
+  - "NOT_CONFIRMED"
+  - "INCONCLUSIVE"
+  - "ERROR"
+  - "UNSUPPORTED"
+  - "POLICY_BLOCKED"
+
+confirmation_rules:
+  - "Version banner match alone from M1/M2 is insufficient for CONFIRMED"
+  - "CONFIRMED requires at least one allowlisted template match with verified=true and redacted evidence_refs"

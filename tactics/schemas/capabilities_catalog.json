@@ -1,0 +1,276 @@
+{
+  "catalog_version": "0.1.0",
+  "boundary": "OWASP_TOP_10_2025_A05_INJECTION",
+  "capabilities": [
+    {
+      "id": "HTTP_REQUEST",
+      "underlying_tool": "httpx_probe_wrapper",
+      "purpose": "Baseline reachability, auth validity, WAF/rate-limit check, and response stability measurement",
+      "contract_ref": "docs/CAPABILITY_CONTRACTS.md#2-http_request",
+      "wstg_ids": [],
+      "vulnerability_categories": [],
+      "supported_input_locations": [
+        "QUERY",
+        "FORM",
+        "JSON_BODY",
+        "COOKIE",
+        "HEADER",
+        "PATH"
+      ],
+      "allowed_inputs": [
+        "request_artifact_ref",
+        "target_url",
+        "method",
+        "headers_ref",
+        "body_ref",
+        "auth_ref",
+        "sample_count",
+        "timeout_seconds"
+      ],
+      "output_fields": [
+        "execution_status",
+        "http_status",
+        "reachable",
+        "auth_failure_detected",
+        "rate_limited",
+        "waf_or_filter_detected",
+        "target_stable",
+        "baseline_ready",
+        "artifact_refs",
+        "error_code"
+      ],
+      "tool_handled_automatically": [
+        "Same-origin redirect guard",
+        "Header/body secret redaction",
+        "Multi-sample stability comparison"
+      ],
+      "forbidden_operations": [
+        "Out-of-scope requests",
+        "Unredacted secret logging"
+      ]
+    },
+    {
+      "id": "SQLI_DETECTION",
+      "underlying_tool": "sqlmap",
+      "purpose": "Bounded SQL injection detection, verification, and identification-only DBMS fingerprinting",
+      "contract_ref": "docs/CAPABILITY_CONTRACTS.md#3-sqli_detection",
+      "wstg_ids": [
+        "WSTG-INJT-05"
+      ],
+      "vulnerability_categories": [
+        "SQL_INJECTION"
+      ],
+      "supported_input_locations": [
+        "QUERY",
+        "FORM",
+        "JSON_BODY",
+        "COOKIE",
+        "HEADER"
+      ],
+      "allowed_inputs": [
+        "request_artifact_ref",
+        "target_url",
+        "method",
+        "parameter_name",
+        "parameter_location",
+        "auth_ref",
+        "baseline_artifact_refs",
+        "techniques",
+        "dbms_hint",
+        "max_requests",
+        "timeout_seconds",
+        "risk_profile"
+      ],
+      "output_fields": [
+        "execution_status",
+        "detection_status",
+        "tested_techniques",
+        "confirmed_techniques",
+        "heuristic_signal_detected",
+        "target_stable",
+        "auth_failure_detected",
+        "rate_limited",
+        "waf_or_filter_detected",
+        "dbms_identified",
+        "proofs",
+        "artifact_refs",
+        "error_code"
+      ],
+      "tool_handled_automatically": [
+        "Heuristic dynamic check",
+        "DBMS fingerprinting",
+        "Boundary/quote closure selection",
+        "ERROR/BOOLEAN/UNION/TIME payload generation and statistical diffing"
+      ],
+      "forbidden_operations": [
+        "--dump",
+        "--dbs",
+        "--tables",
+        "--columns",
+        "--os-shell",
+        "--os-cmd",
+        "--file-read",
+        "--file-write",
+        "--tamper",
+        "--risk=2",
+        "--risk=3",
+        "technique=S"
+      ]
+    },
+    {
+      "id": "XSS_DETECTION",
+      "underlying_tool": "dalfox",
+      "purpose": "HTTP reflection probing, HTML/Attribute/Script/URL context analysis, and non-destructive XSS PoC detection",
+      "contract_ref": "docs/CAPABILITY_CONTRACTS.md#4-xss_detection",
+      "wstg_ids": [
+        "WSTG-INPV-01",
+        "WSTG-INPV-02"
+      ],
+      "vulnerability_categories": [
+        "XSS"
+      ],
+      "supported_input_locations": [
+        "QUERY",
+        "FORM",
+        "HEADER"
+      ],
+      "allowed_inputs": [
+        "request_artifact_ref",
+        "target_url",
+        "method",
+        "parameter_name",
+        "parameter_location",
+        "auth_ref",
+        "baseline_artifact_refs",
+        "max_requests",
+        "timeout_seconds",
+        "risk_profile"
+      ],
+      "output_fields": [
+        "execution_status",
+        "detection_status",
+        "reflection_detected",
+        "reflection_contexts",
+        "unencoded_chars",
+        "csp_observed",
+        "needs_browser_verification",
+        "proofs",
+        "artifact_refs",
+        "error_code"
+      ],
+      "tool_handled_automatically": [
+        "Canary reflection probing",
+        "HTML/Attribute/Script/URL context analysis",
+        "Character encoding/filter bypass analysis",
+        "Context-aware non-destructive PoC construction"
+      ],
+      "forbidden_operations": [
+        "--blind (external callback)",
+        "--mining-dict",
+        "destructive stored flood"
+      ]
+    },
+    {
+      "id": "BROWSER_INTERACTION",
+      "underlying_tool": "playwright",
+      "purpose": "Deterministic DOM/JS execution verification using canary callback hooks without LLM-driven browser control",
+      "contract_ref": "docs/CAPABILITY_CONTRACTS.md#5-browser_interaction",
+      "wstg_ids": [
+        "WSTG-INPV-01",
+        "WSTG-CLNT-01"
+      ],
+      "vulnerability_categories": [
+        "XSS"
+      ],
+      "supported_input_locations": [
+        "QUERY",
+        "FORM",
+        "DOM"
+      ],
+      "allowed_inputs": [
+        "target_url",
+        "method",
+        "parameter_name",
+        "parameter_location",
+        "auth_ref",
+        "canary_token",
+        "candidate_payload_ref",
+        "timeout_seconds"
+      ],
+      "output_fields": [
+        "execution_status",
+        "js_execution_confirmed",
+        "matched_canary_token",
+        "execution_sink",
+        "csp_blocked",
+        "proofs",
+        "artifact_refs",
+        "error_code"
+      ],
+      "tool_handled_automatically": [
+        "Headless Chromium navigation and DOM input population",
+        "Deterministic JS execution hook (window/console/dialog canary listener)",
+        "CSP block observation and DOM snapshot redaction"
+      ],
+      "forbidden_operations": [
+        "LLM-generated arbitrary click/fill action sequences",
+        "Cross-origin navigation",
+        "Credential guessing"
+      ]
+    },
+    {
+      "id": "CVE_SAFE_CHECK",
+      "underlying_tool": "nuclei",
+      "purpose": "Non-destructive offline-allowlisted Nuclei template verification for KNOWN_CVE (SSTI_DETECTION / CMDI_DETECTION template checks are optional future extensions)",
+      "contract_ref": "docs/CAPABILITY_CONTRACTS.md#6-cve_safe_check",
+      "wstg_ids": [
+        "WSTG-INFO-08"
+      ],
+      "vulnerability_categories": [
+        "KNOWN_CVE"
+      ],
+      "optional_future_categories": [
+        "SSTI",
+        "OS_COMMAND_INJECTION"
+      ],
+      "supported_input_locations": [
+        "QUERY",
+        "FORM",
+        "JSON_BODY",
+        "HEADER",
+        "PATH"
+      ],
+      "allowed_inputs": [
+        "target_url",
+        "cve_id",
+        "technology_name",
+        "technology_version",
+        "template_allowlist_refs",
+        "auth_ref",
+        "max_requests",
+        "timeout_seconds",
+        "risk_profile"
+      ],
+      "output_fields": [
+        "execution_status",
+        "detection_status",
+        "matched_template_ids",
+        "matcher_names",
+        "proofs",
+        "artifact_refs",
+        "error_code"
+      ],
+      "tool_handled_automatically": [
+        "Offline approved template execution",
+        "Matcher/extractor evaluation",
+        "Request/response capture"
+      ],
+      "forbidden_operations": [
+        "Unapproved remote templates",
+        "interactsh/OOB network callbacks",
+        "dos/fuzzing/headless/code templates",
+        "-severity info/low broad spray"
+      ]
+    }
+  ]
+}

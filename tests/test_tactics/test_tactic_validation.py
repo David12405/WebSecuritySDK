@@ -1,4 +1,4 @@
-"""Validation tests for the Generic Guided Tactic Schema and SQLi Tactic YAML."""
+"""Validation tests for the Generic Guided Tactic Schema, Capability Catalog, and Tactics."""
 
 from __future__ import annotations
 
@@ -14,10 +14,12 @@ from websecuritycheck.domain.analysis_models import VulnerabilityCategory
 from websecuritycheck.domain.enums import InputLocation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_PATH = PROJECT_ROOT / "tactics" / "schemas" / "tactic.schema.json"
-SQLI_TACTIC_PATH = PROJECT_ROOT / "tactics" / "sqli" / "sqli_testing.yaml"
+TACTICS_ROOT = PROJECT_ROOT / "tactics"
+SCHEMA_PATH = TACTICS_ROOT / "schemas" / "tactic.schema.json"
+CATALOG_PATH = TACTICS_ROOT / "schemas" / "capabilities_catalog.json"
+SQLI_TACTIC_PATH = TACTICS_ROOT / "sqli" / "sqli_testing.yaml"
 CONTRACTS_PATH = PROJECT_ROOT / "docs" / "CAPABILITY_CONTRACTS.md"
-GUIDE_PATH = PROJECT_ROOT / "docs" / "SQLI_TACTIC_GUIDE.md"
+HANDOFF_PATH = PROJECT_ROOT / "docs" / "M3_TACTIC_AND_MCP_HANDOFF.md"
 
 EXPECTED_OUTCOMES = frozenset(
     {
@@ -29,44 +31,22 @@ EXPECTED_OUTCOMES = frozenset(
         "POLICY_BLOCKED",
     }
 )
-CAPABILITY_INPUT_KEYS = {
-    "HTTP_REQUEST": frozenset(
-        {
-            "request_artifact_ref",
-            "target_url",
-            "method",
-            "headers_ref",
-            "body_ref",
-            "auth_ref",
-            "sample_count",
-            "timeout_seconds",
-        }
-    ),
-    "SQLI_DETECTION": frozenset(
-        {
-            "request_artifact_ref",
-            "target_url",
-            "method",
-            "parameter_name",
-            "parameter_location",
-            "auth_ref",
-            "baseline_artifact_refs",
-            "techniques",
-            "dbms_hint",
-            "max_requests",
-            "timeout_seconds",
-            "risk_profile",
-        }
-    ),
-}
 
 
 def _load_schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
 
-def _load_sqli_tactic() -> dict:
-    data = yaml.safe_load(SQLI_TACTIC_PATH.read_text(encoding="utf-8"))
+def _load_catalog() -> dict:
+    return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+
+
+def _tactic_yaml_paths() -> list[Path]:
+    return sorted(TACTICS_ROOT.rglob("*.yaml"))
+
+
+def _load_yaml(path: Path) -> dict:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     return data
 
@@ -82,25 +62,63 @@ def _markdown_slugs(path: Path) -> set[str]:
     return slugs
 
 
-def test_sqli_tactic_validates_against_json_schema():
+def test_capabilities_catalog_matches_contracts_and_domain_enums():
+    catalog = _load_catalog()
+    caps = catalog["capabilities"]
+    cap_ids = [item["id"] for item in caps]
+    assert len(cap_ids) == len(set(cap_ids))
+    assert set(cap_ids) == {
+        "HTTP_REQUEST",
+        "SQLI_DETECTION",
+        "XSS_DETECTION",
+        "BROWSER_INTERACTION",
+        "CVE_SAFE_CHECK",
+    }
+
+    valid_vulns = {item.value for item in VulnerabilityCategory}
+    valid_locations = {item.value for item in InputLocation}
+    contract_slugs = _markdown_slugs(CONTRACTS_PATH)
+
+    for cap in caps:
+        assert set(cap["vulnerability_categories"]) <= valid_vulns
+        assert set(cap["supported_input_locations"]) <= valid_locations
+        assert cap["allowed_inputs"]
+        assert cap["output_fields"]
+        file_part, _, anchor = cap["contract_ref"].partition("#")
+        assert (PROJECT_ROOT / file_part).is_file()
+        assert anchor in contract_slugs
+
+    assert HANDOFF_PATH.is_file()
+
+
+@pytest.mark.parametrize("tactic_path", _tactic_yaml_paths(), ids=lambda p: p.name)
+def test_all_tactics_validate_against_json_schema(tactic_path: Path):
     jsonschema = pytest.importorskip("jsonschema")
     schema = _load_schema()
     jsonschema.Draft202012Validator.check_schema(schema)
-    tactic = _load_sqli_tactic()
+    tactic = _load_yaml(tactic_path)
     jsonschema.Draft202012Validator(schema).validate(tactic)
 
 
-def test_sqli_tactic_semantics_domain_alignment_and_contracts():
-    tactic = _load_sqli_tactic()
+@pytest.mark.parametrize("tactic_path", _tactic_yaml_paths(), ids=lambda p: p.name)
+def test_all_tactics_semantics_domain_alignment_and_catalog_consistency(tactic_path: Path):
+    tactic = _load_yaml(tactic_path)
+    catalog_by_id = {item["id"]: item for item in _load_catalog()["capabilities"]}
+    contract_slugs = _markdown_slugs(CONTRACTS_PATH)
 
-    # Domain enum alignment
     assert tactic["scope"]["vulnerability"] in {item.value for item in VulnerabilityCategory}
     valid_locations = {item.value for item in InputLocation}
     assert set(tactic["scope"]["supported_input_locations"]) <= valid_locations
     assert set(tactic["outcomes"]) == EXPECTED_OUTCOMES
 
-    # Unique step IDs, valid capabilities, valid transition targets
     declared_caps = {cap["id"]: cap for cap in tactic["capabilities"]}
+    for cap_id, cap_entry in declared_caps.items():
+        assert cap_id in catalog_by_id
+        assert cap_entry["contract_ref"] == catalog_by_id[cap_id]["contract_ref"]
+        file_part, _, anchor = cap_entry["contract_ref"].partition("#")
+        assert (PROJECT_ROOT / file_part).is_file()
+        assert anchor in contract_slugs
+
     steps = tactic["steps"]
     step_ids = [step["id"] for step in steps]
     assert len(step_ids) == len(set(step_ids))
@@ -112,31 +130,17 @@ def test_sqli_tactic_semantics_domain_alignment_and_contracts():
         if rec_cap is not None:
             assert rec_cap in declared_caps
             suggested = step.get("suggested_inputs") or {}
-            if rec_cap in CAPABILITY_INPUT_KEYS:
-                assert set(suggested) <= CAPABILITY_INPUT_KEYS[rec_cap]
+            allowed = set(catalog_by_id[rec_cap]["allowed_inputs"])
+            assert set(suggested) <= allowed
         for option in step["next_options"]:
             assert option["action"] in valid_actions
             if option["action"] in EXPECTED_OUTCOMES:
                 reaches_terminal = True
     assert reaches_terminal
 
-    # Contract & reference resolution
     for ref in tactic["references"]:
         if ref.endswith(".md"):
             assert (PROJECT_ROOT / ref).is_file()
-    assert GUIDE_PATH.is_file()
-    assert CONTRACTS_PATH.is_file()
-
-    contract_slugs = _markdown_slugs(CONTRACTS_PATH)
-    for cap in tactic["capabilities"]:
-        file_part, _, anchor = cap["contract_ref"].partition("#")
-        assert (PROJECT_ROOT / file_part).is_file()
-        assert anchor in contract_slugs
-
-    # Required M1/M2 context accuracy & evidence rules
-    ctx_sources = {item["name"]: item["source"] for item in tactic["required_context"]}
-    assert ctx_sources["parameter_name"] == "M2.InputCandidate"
-    assert ctx_sources["expected_signals"] == "M2.ValidationCapabilityRequirement"
 
     joined_rules = " ".join(tactic["confirmation_rules"]).lower()
     assert "confirmed" in joined_rules
@@ -147,94 +151,12 @@ def test_tactic_schema_rejects_unknown_fields_and_invalid_modes():
     jsonschema = pytest.importorskip("jsonschema")
     validator = jsonschema.Draft202012Validator(_load_schema())
 
-    invalid_extra = _load_sqli_tactic()
+    invalid_extra = _load_yaml(SQLI_TACTIC_PATH)
     invalid_extra["unexpected_field"] = True
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(invalid_extra)
 
-    invalid_mode = copy.deepcopy(_load_sqli_tactic())
+    invalid_mode = copy.deepcopy(_load_yaml(SQLI_TACTIC_PATH))
     invalid_mode["mode"] = "WORKFLOW_ENGINE"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(invalid_mode)
-
-
-def test_generic_schema_supports_reflected_xss_tactic_shape():
-    jsonschema = pytest.importorskip("jsonschema")
-    validator = jsonschema.Draft202012Validator(_load_schema())
-
-    xss_tactic_example = {
-        "schema_version": "0.1.0",
-        "tactic_id": "TACTIC-XSS-001",
-        "name": "reflected_xss_testing",
-        "mode": "GUIDED_AGENT",
-        "scope": {
-            "vulnerability": VulnerabilityCategory.XSS.value,
-            "supported_input_locations": ["QUERY", "FORM", "HEADER", "DOM"],
-            "limitations": ["Reflected XSS detection and verification only"],
-        },
-        "references": ["WSTG-INPV-01", "docs/TACTIC_SCHEMA_SPEC.md"],
-        "required_context": [
-            {"name": "target_url", "source": "M1.EndpointDefinition", "required": True},
-            {"name": "parameter_name", "source": "M2.InputCandidate", "required": True},
-            {"name": "execution_policy", "source": "M1.ExecutionPolicy", "required": True},
-        ],
-        "capabilities": [
-            {
-                "id": "HTTP_REQUEST",
-                "contract_ref": "docs/CAPABILITY_CONTRACTS.md#2-http_request",
-                "role": "required",
-            },
-            {
-                "id": "XSS_DETECTION",
-                "contract_ref": "docs/CAPABILITY_CONTRACTS.md#xss",
-                "role": "required",
-            },
-            {
-                "id": "BROWSER_INTERACTION",
-                "contract_ref": "docs/CAPABILITY_CONTRACTS.md#browser",
-                "role": "optional",
-            },
-        ],
-        "safety_rules": ["Never execute unauthorized active payloads outside scope"],
-        "steps": [
-            {
-                "id": "preflight",
-                "goal": "Verify scope and policy",
-                "recommended_capability": None,
-                "guidance": "Check policy and input location",
-                "next_options": [
-                    {"when": "policy_denied", "action": "POLICY_BLOCKED", "reason": "Denied"},
-                    {"when": "ready", "action": "reflection_probe", "reason": "Probe reflection"},
-                ],
-            },
-            {
-                "id": "reflection_probe",
-                "goal": "Check benign canary reflection",
-                "recommended_capability": "HTTP_REQUEST",
-                "guidance": "Stop early as NOT_CONFIRMED if benign canary is not reflected",
-                "next_options": [
-                    {
-                        "when": "not_reflected",
-                        "action": "NOT_CONFIRMED",
-                        "reason": "No reflection observed",
-                    },
-                    {"when": "reflected", "action": "finalize", "reason": "Evaluate proof"},
-                ],
-            },
-            {
-                "id": "finalize",
-                "goal": "Verify evidence and conclude",
-                "recommended_capability": None,
-                "guidance": "Confirm only with unencoded executable context proof",
-                "next_options": [
-                    {"when": "verified", "action": "CONFIRMED", "reason": "Verified"},
-                    {"when": "insufficient", "action": "INCONCLUSIVE", "reason": "Uncertain"},
-                ],
-            },
-        ],
-        "outcomes": sorted(EXPECTED_OUTCOMES),
-        "confirmation_rules": [
-            "Requires unencoded reflection in executable context with redacted evidence"
-        ],
-    }
-    validator.validate(xss_tactic_example)
