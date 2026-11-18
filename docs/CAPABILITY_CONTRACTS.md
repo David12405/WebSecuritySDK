@@ -30,7 +30,7 @@ Kiểm tra khả năng kết nối trực tiếp tới đích, xác nhận hiệ
 | `headers_ref` | `opaque_ref \| null` | Không | Tham chiếu bộ headers không lộ secret trong prompt Agent. |
 | `body_ref` | `opaque_ref \| null` | Không | Tham chiếu mẫu body template (form/JSON). |
 | `auth_ref` | `opaque_ref \| null` | Không | Tham chiếu ngữ cảnh xác thực (`VAULT-...`), giải mã nội bộ bên trong Adapter. |
-| `sample_count` | `integer` | Không (Mặc định `2`) | Số lượng request mẫu lành tính (`1..3`) để đánh giá `target_stable`. |
+| `sample_count` | `integer` | Không (Mặc định `2`) | Số lượng request mẫu lành tính (`1..3`) để đánh giá `target_stable`. **Bắt buộc `>= 2`** ở bước baseline để có thể đạt `baseline_ready=true` (`1` luôn trả về `target_stable=null` và `baseline_ready=false`). |
 | `timeout_seconds` | `integer` | Có | Giới hạn thời gian cho mỗi request. |
 
 *Lưu ý tái tạo request:* Khi `request_artifact_ref` không chứa raw HTTP request đầy đủ (do Module 1 đã redact), Adapter được phép dựng lại request từ `(target_url, method, headers_ref, body_ref)` kết hợp giải mã `auth_ref` ngay trong ranh giới thực thi cô lập.
@@ -68,7 +68,7 @@ Thực hiện dò tìm và xác minh lỗ hổng SQL Injection cùng DBMS finger
 | `auth_ref` | `opaque_ref \| null` | Không | Tham chiếu xác thực, giải mã nội bộ khi tạo request `-r`. |
 | `baseline_artifact_refs` | `array[opaque_ref]` | Có | Ít nhất 1 artifact reference từ bước `baseline` dùng làm đối chứng. |
 | `techniques` | `array[enum]` | Có | Tập con khác rỗng của `["ERROR", "BOOLEAN", "UNION", "TIME"]`. Cấm `S` (stacked) và `Q` (inline) ở v0.1. |
-| `dbms_hint` | `string \| null` | Không | Gợi ý DBMS từ `TargetModel.technologies` (chỉ làm hint, không khóa cứng nếu chưa kiểm chứng). |
+| `dbms_hint` | `string \| null` | Không | Gợi ý DBMS từ `TargetModel.technologies` (chỉ làm hint, không khóa cứng nếu chưa kiểm chứng). Dùng `null` khi không có gợi ý; cấm truyền placeholder bắt đầu bằng `"-"` (ví dụ `"--"`). |
 | `max_requests` | `integer` | Có | Ngân sách HTTP requests tối đa cho lần thực thi. |
 | `timeout_seconds` | `integer` | Có | Giới hạn thời gian tối đa của lần thực thi. |
 | `risk_profile` | `enum` | Có | Bắt buộc `LOW` trong v0.1 (Adapter ép `--risk=1`, `--batch`, cấm `--dump`, `--dbs`, `--os-shell`). |

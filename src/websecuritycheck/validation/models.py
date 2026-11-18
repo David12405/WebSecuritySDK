@@ -129,6 +129,21 @@ class SqliDetectionCapabilityInput(StrictModel):
             _validate_opaque_artifact_ref(value)
         return value
 
+    @field_validator("dbms_hint")
+    @classmethod
+    def validate_dbms_hint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned.startswith("-"):
+            raise ValueError(
+                "dbms_hint must be null or a valid DBMS name, "
+                "not a CLI flag or placeholder like '--'"
+            )
+        return cleaned
+
     @field_validator("baseline_artifact_refs")
     @classmethod
     def validate_baseline_refs(cls, value: list[str]) -> list[str]:

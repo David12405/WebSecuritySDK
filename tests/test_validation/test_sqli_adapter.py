@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 from functools import wraps
 
+import pytest
+from pydantic import ValidationError
+
 from mcp_servers.websec_tools.errors import envelope
 from websecuritycheck.domain.enums import InputLocation
 from websecuritycheck.domain.models import ExecutionPolicy
@@ -289,3 +292,23 @@ def test_verifier_enforces_time_stability_and_heuristic_never_confirmed():
     checked_heuristic = verify_sqli_proofs(heuristic_output)
     assert checked_heuristic.detection_status == DetectionStatus.HEURISTIC_ONLY
     assert checked_heuristic.confirmed_techniques == []
+
+
+def test_sqli_input_validates_and_normalizes_dbms_hint():
+    base = {
+        "target_url": "https://shop.example.com/items?id=1",
+        "method": "GET",
+        "parameter_name": "id",
+        "parameter_location": InputLocation.QUERY,
+        "baseline_artifact_refs": ["http-exchange-base-1"],
+    }
+
+    blank = SqliDetectionCapabilityInput(**base, dbms_hint="   ")
+    assert blank.dbms_hint is None
+
+    valid = SqliDetectionCapabilityInput(**base, dbms_hint=" SQLite ")
+    assert valid.dbms_hint == "SQLite"
+
+    for bad_hint in ("--", "--dump", "-o"):
+        with pytest.raises(ValidationError):
+            SqliDetectionCapabilityInput(**base, dbms_hint=bad_hint)
