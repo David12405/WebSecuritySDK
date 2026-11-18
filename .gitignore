@@ -8,9 +8,13 @@
 *.db
 *.sqlite3
 
+# Tactic registry runtime state (Stage A publishes here; not committed)
+.websec/
+
 # Reports produced by a local run
 report.json
 *.sarif
+source_to_plan_report.html
 
 # Python
 __pycache__/
@@ -20,6 +24,9 @@ build/
 dist/
 .venv/
 venv/
+# Semgrep has no Windows build, so the live M1->M2 capture runs from a
+# separate interpreter inside WSL.
+.venv-wsl/
 *.manifest.json
 
 # Tooling caches
@@ -40,7 +47,7 @@ playwright/.cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
+docs/
 # Editors / OS
 .idea/
 .vscode/
