@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from mcp_servers.websec_tools.errors import ToolError
 from mcp_servers.websec_tools.validation import sqlmap as l6_sqlmap
+from websecuritycheck.domain.enums import InputLocation
 from websecuritycheck.domain.models import ExecutionPolicy
 from websecuritycheck.policy.scope_guard import in_scope
 
@@ -25,6 +27,10 @@ from .resolvers import InMemoryRequestMaterializer, RequestMaterializerProtocol
 from .verifier import verify_sqli_proofs
 
 L6DetectSqliFn = Callable[..., Awaitable[dict[str, Any]]]
+
+_ESCALATION_MIN_BUDGET = 80
+_ESCALATION_MIN_REMAINING_TIMEOUT = 20.0
+_ESCALATION_BOUNDARY_LEVEL = 3
 
 _TECHNIQUE_VERIFICATION_METHOD = {
     SQLiTechnique.ERROR: "error_signature_match",
@@ -108,20 +114,25 @@ class SqlmapDetectionAdapter:
         if self._policy is not None:
             effective_timeout = min(effective_timeout, float(self._policy.max_execution_seconds))
 
+        common_kwargs: dict[str, Any] = {
+            "parameter_location": request.parameter_location.value,
+            "method": request.method,
+            "techniques": [tech.value for tech in request.techniques],
+            "dbms_hint": request.dbms_hint,
+            "risk_profile": request.risk_profile.value,
+            "headers": materialized.headers or None,
+            "cookies": materialized.cookies or None,
+            "body": materialized.body,
+            "raw_request": materialized.raw_request,
+        }
+
+        started = time.monotonic()
         try:
             envelope_res = await self._detect_fn(
                 request.target_url,
                 request.parameter_name,
-                parameter_location=request.parameter_location.value,
-                method=request.method,
-                techniques=[tech.value for tech in request.techniques],
-                dbms_hint=request.dbms_hint,
                 timeout_seconds=effective_timeout,
-                risk_profile=request.risk_profile.value,
-                headers=materialized.headers or None,
-                cookies=materialized.cookies or None,
-                body=materialized.body,
-                raw_request=materialized.raw_request,
+                **common_kwargs,
             )
         except ToolError as exc:
             exec_status = (
@@ -142,11 +153,60 @@ class SqlmapDetectionAdapter:
             if ref not in artifact_refs:
                 artifact_refs.append(ref)
 
+        pass1_heuristic = bool(data.get("heuristic_signal_detected", False))
+        pass1_server_error = bool(data.get("server_error_detected", False))
+        pass1_level = int(data.get("level_used", 1))
+        pass1_anomalies = (
+            not bool(data.get("target_stable", True))
+            or bool(data.get("auth_failure_detected", False))
+            or bool(data.get("rate_limited", False))
+            or bool(data.get("waf_or_filter_detected", False))
+        )
+        remaining_timeout = effective_timeout - (time.monotonic() - started)
+
+        should_escalate = (
+            not (data.get("findings") or [])
+            and not pass1_anomalies
+            and (pass1_heuristic or pass1_server_error)
+            and pass1_level < _ESCALATION_BOUNDARY_LEVEL
+            and request.parameter_location != InputLocation.HEADER
+            and request.max_requests >= _ESCALATION_MIN_BUDGET
+            and remaining_timeout >= _ESCALATION_MIN_REMAINING_TIMEOUT
+        )
+        if should_escalate:
+            try:
+                pass2_res = await self._detect_fn(
+                    request.target_url,
+                    request.parameter_name,
+                    timeout_seconds=remaining_timeout,
+                    boundary_level=_ESCALATION_BOUNDARY_LEVEL,
+                    **common_kwargs,
+                )
+            except ToolError as exc:
+                exec_status = (
+                    CapabilityExecutionStatus.TIMEOUT
+                    if exc.code == "E_TIMEOUT"
+                    else CapabilityExecutionStatus.FAILED
+                )
+                return SqliDetectionCapabilityOutput(
+                    execution_status=exec_status,
+                    detection_status=DetectionStatus.INCONCLUSIVE,
+                    artifact_refs=artifact_refs,
+                    error_code=exc.code,
+                )
+            pass2_data = pass2_res.get("data") or {}
+            for manifest in pass2_data.get("artifact_manifests") or []:
+                ref = self._materializer.record_artifact(manifest)
+                if ref not in artifact_refs:
+                    artifact_refs.append(ref)
+            data = pass2_data
+
         target_stable = bool(data.get("target_stable", True))
         auth_failed = bool(data.get("auth_failure_detected", False))
         rate_limited = bool(data.get("rate_limited", False))
         waf_detected = bool(data.get("waf_or_filter_detected", False))
         anomalies = not target_stable or auth_failed or rate_limited or waf_detected
+        heuristic_signal = pass1_heuristic or bool(data.get("heuristic_signal_detected", False))
 
         candidate_proofs: list[SQLiProof] = []
         for raw_finding in data.get("findings") or []:
@@ -178,7 +238,7 @@ class SqlmapDetectionAdapter:
             detection_status=DetectionStatus.INCONCLUSIVE,
             tested_techniques=tested_techniques,
             confirmed_techniques=[],
-            heuristic_signal_detected=bool(data.get("heuristic_signal_detected", False)),
+            heuristic_signal_detected=heuristic_signal,
             target_stable=target_stable,
             auth_failure_detected=auth_failed,
             rate_limited=rate_limited,

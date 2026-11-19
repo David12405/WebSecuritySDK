@@ -139,6 +139,8 @@ class SQLMapExecutionData(BaseModel):
     findings: list[SQLMapFinding] = Field(default_factory=list)
     dbms_identified: str | None = None
     heuristic_signal_detected: bool = False
+    server_error_detected: bool = False
+    level_used: int = 1
     target_stable: bool = True
     auth_failure_detected: bool = False
     rate_limited: bool = False
@@ -576,6 +578,7 @@ def parse_sqlmap_output(
     parameter_name: str,
     parameter_location: str,
     requested_techniques: list[str],
+    level_used: int = 1,
 ) -> SQLMapExecutionData:
     """Parse SQLMap stdout, stderr, and session logs into structured, redacted output."""
 
@@ -615,6 +618,13 @@ def parse_sqlmap_output(
             lowered_all,
         )
     )
+    server_error = bool(
+        "http error codes detected during run:\n500" in lowered_all
+        or re.search(
+            r"\b500\s*\(internal server error\)|\bhttp\s+error\s+500\b",
+            lowered_all,
+        )
+    )
 
     warnings: list[str] = []
     if not target_stable:
@@ -625,6 +635,8 @@ def parse_sqlmap_output(
         warnings.append("SQLMap observed HTTP 429 / rate-limiting signals")
     if auth_failure:
         warnings.append("SQLMap observed HTTP 401 / authentication failure signals")
+    if server_error:
+        warnings.append("SQLMap observed HTTP 500 server error signals")
 
     redacted_raw = redact_sensitive_text(
         "\n".join(
@@ -665,6 +677,8 @@ def parse_sqlmap_output(
         findings=findings,
         dbms_identified=dbms_identified,
         heuristic_signal_detected=heuristic,
+        server_error_detected=server_error,
+        level_used=level_used,
         target_stable=target_stable,
         auth_failure_detected=auth_failure,
         rate_limited=rate_limited,
@@ -730,6 +744,7 @@ async def detect_sqli(
     sample_value: str = "1",
     raw_request: str | None = None,
     *,
+    boundary_level: int | None = None,
     runner: Runner | None = None,
     executable: str | None = None,
 ) -> dict[str, Any]:
@@ -768,6 +783,13 @@ async def detect_sqli(
     if any(ch in sample_value for ch in "\r\n\x00"):
         raise ToolError("E_INVALID_ARGUMENT", "sample_value contains forbidden characters")
 
+    if boundary_level is not None and (
+        isinstance(boundary_level, bool)
+        or not isinstance(boundary_level, int)
+        or boundary_level not in {1, 2, 3}
+    ):
+        raise ToolError("E_INVALID_ARGUMENT", "boundary_level must be 1, 2, or 3")
+
     exe = _resolve_executable(executable)
     raw_http, level, p_flag = _build_request_and_profile(
         target=target,
@@ -780,6 +802,8 @@ async def detect_sqli(
         sample_value=sample_value,
         raw_request=raw_request,
     )
+    if boundary_level is not None:
+        level = max(level, boundary_level)
 
     per_req_timeout = max(
         MIN_PER_REQUEST_TIMEOUT,
@@ -853,6 +877,7 @@ async def detect_sqli(
             parameter_name=safe_param,
             parameter_location=normalized_location,
             requested_techniques=requested_techniques,
+            level_used=level,
         )
         if returncode != 0 and not parsed.findings:
             parsed.warnings.append(f"SQLMap exited cleanly/partially with code {returncode}")

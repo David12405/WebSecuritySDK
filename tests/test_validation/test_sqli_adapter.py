@@ -312,3 +312,137 @@ def test_sqli_input_validates_and_normalizes_dbms_hint():
     for bad_hint in ("--", "--dump", "-o"):
         with pytest.raises(ValidationError):
             SqliDetectionCapabilityInput(**base, dbms_hint=bad_hint)
+
+
+@async_test
+async def test_sqlmap_adapter_auto_escalates_boundary_level_on_http_500_when_budget_allows():
+    calls: list[int | None] = []
+
+    async def two_pass_detect(target, parameter_name, **kwargs):
+        level = kwargs.get("boundary_level")
+        calls.append(level)
+        if level is None:
+            return envelope(
+                "pass1",
+                {
+                    "tool": "sqlmap",
+                    "target": target,
+                    "method": kwargs["method"],
+                    "parameter_name": parameter_name,
+                    "parameter_location": kwargs["parameter_location"],
+                    "requested_techniques": kwargs["techniques"],
+                    "findings": [],
+                    "dbms_identified": None,
+                    "heuristic_signal_detected": False,
+                    "server_error_detected": True,
+                    "level_used": 1,
+                    "target_stable": True,
+                    "auth_failure_detected": False,
+                    "rate_limited": False,
+                    "waf_or_filter_detected": False,
+                    "warnings": [],
+                    "artifact_manifests": [
+                        {
+                            "artifact_ref": "sqlmap-pass1-001",
+                            "artifact_type": "TOOL_RAW_OUTPUT",
+                            "content": "500 Internal Server Error",
+                            "media_type": "text/plain",
+                            "redaction_applied": True,
+                        }
+                    ],
+                },
+                False,
+            )
+        return envelope(
+            "pass2",
+            {
+                "tool": "sqlmap",
+                "target": target,
+                "method": kwargs["method"],
+                "parameter_name": parameter_name,
+                "parameter_location": kwargs["parameter_location"],
+                "requested_techniques": kwargs["techniques"],
+                "findings": [
+                    {
+                        "parameter_name": parameter_name,
+                        "location_label": "GET",
+                        "technique": "UNION",
+                        "sqlmap_type": "UNION query",
+                        "title": "Generic UNION query",
+                        "redacted_payload_summary": "q=apple')) UNION SELECT 1--",
+                        "dbms_identified": "SQLite",
+                    }
+                ],
+                "dbms_identified": "SQLite",
+                "heuristic_signal_detected": False,
+                "server_error_detected": False,
+                "level_used": 3,
+                "target_stable": True,
+                "auth_failure_detected": False,
+                "rate_limited": False,
+                "waf_or_filter_detected": False,
+                "warnings": [],
+                "artifact_manifests": [
+                    {
+                        "artifact_ref": "sqlmap-pass2-002",
+                        "artifact_type": "TOOL_RAW_OUTPUT",
+                        "content": "UNION confirmed",
+                        "media_type": "text/plain",
+                        "redaction_applied": True,
+                    }
+                ],
+            },
+            False,
+        )
+
+    baseline = HttpRequestCapabilityOutput(
+        execution_status=CapabilityExecutionStatus.COMPLETED,
+        http_status=200,
+        reachable=True,
+        auth_failure_detected=False,
+        rate_limited=False,
+        waf_or_filter_detected=False,
+        target_stable=True,
+        baseline_ready=True,
+        artifact_refs=["http-exchange-base-1"],
+    )
+    adapter = SqlmapDetectionAdapter(
+        authorized_scope=["http://127.0.0.1:3000"],
+        policy=ExecutionPolicy(),
+        detect_fn=two_pass_detect,
+    )
+    output = await adapter.execute(
+        SqliDetectionCapabilityInput(
+            target_url="http://127.0.0.1:3000/rest/products/search?q=apple",
+            method="GET",
+            parameter_name="q",
+            parameter_location=InputLocation.QUERY,
+            baseline_artifact_refs=["http-exchange-base-1"],
+            techniques=[SQLiTechnique.ERROR, SQLiTechnique.BOOLEAN, SQLiTechnique.UNION],
+            max_requests=120,
+            timeout_seconds=120,
+        ),
+        baseline=baseline,
+    )
+    assert calls == [None, 3]
+    assert output.detection_status == DetectionStatus.CONFIRMED
+    assert output.confirmed_techniques == [SQLiTechnique.UNION]
+    assert output.artifact_refs == ["sqlmap-pass1-001", "sqlmap-pass2-002"]
+
+    # Budget too low (< 80) -> must NOT escalate to Pass 2
+    calls.clear()
+    low_budget = await adapter.execute(
+        SqliDetectionCapabilityInput(
+            target_url="http://127.0.0.1:3000/rest/products/search?q=apple",
+            method="GET",
+            parameter_name="q",
+            parameter_location=InputLocation.QUERY,
+            baseline_artifact_refs=["http-exchange-base-1"],
+            techniques=[SQLiTechnique.ERROR, SQLiTechnique.BOOLEAN, SQLiTechnique.UNION],
+            max_requests=50,
+            timeout_seconds=120,
+        ),
+        baseline=baseline,
+    )
+    assert calls == [None]
+    assert low_budget.detection_status == DetectionStatus.NOT_DETECTED

@@ -251,3 +251,39 @@ def test_parse_sqlmap_output_redacts_secrets_and_detects_anomalies():
 
 def test_detect_sqli_is_registered_on_mcp_server():
     assert server.detect_sqli in server.TOOLS
+
+
+@async_test
+async def test_detect_sqli_supports_bounded_boundary_level_and_detects_http_500():
+    seen_argv: list[str] = []
+
+    async def fake_runner(argv: list[str], timeout: float) -> tuple[int, bytes, bytes]:
+        seen_argv.extend(argv)
+        stdout = (
+            "[WARNING] HTTP error codes detected during run:\n"
+            "500 (Internal Server Error) - 13 times\n"
+        )
+        return 0, stdout.encode("utf-8"), b""
+
+    res = await sqlmap.detect_sqli(
+        "http://127.0.0.1:3000/rest/products/search?q=apple",
+        "q",
+        parameter_location="QUERY",
+        method="GET",
+        boundary_level=3,
+        runner=fake_runner,
+    )
+    assert "--level=3" in seen_argv
+    assert "--risk=1" in seen_argv
+    assert seen_argv[seen_argv.index("-p") + 1] == "q"
+    assert res["data"]["level_used"] == 3
+    assert res["data"]["server_error_detected"] is True
+
+    with pytest.raises(ToolError) as exc_info:
+        await sqlmap.detect_sqli(
+            "http://127.0.0.1:3000/rest/products/search?q=apple",
+            "q",
+            boundary_level=4,
+            runner=fake_runner,
+        )
+    assert exc_info.value.code == "E_INVALID_ARGUMENT"
