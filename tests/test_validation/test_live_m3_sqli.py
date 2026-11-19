@@ -48,21 +48,67 @@ def _ensure_sqlmap_available() -> None:
         pytest.skip("sqlmap executable not found on PATH and WEBSEC_SQLMAP_PATH is unset")
 
 
-def _live_target_url_and_scope() -> tuple[str, str]:
+def _live_target_config() -> dict[str, str | InputLocation | None]:
     base = os.getenv("M3_LIVE_TARGET_URL", DEFAULT_API_TARGET).strip().rstrip("/")
     parsed = urlsplit(base)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    if parsed.path and parsed.path != "/":
-        return base, origin
-    return f"{origin}/api/users?id=1", origin
+    target_url = base if (parsed.path and parsed.path != "/") else f"{origin}/api/users?id=1"
+
+    param_name = os.getenv("M3_LIVE_PARAM", "id").strip() or "id"
+    method = os.getenv("M3_LIVE_METHOD", "GET").strip().upper() or "GET"
+    location_raw = os.getenv("M3_LIVE_LOCATION", "QUERY").strip().upper() or "QUERY"
+    location = InputLocation(location_raw)
+    dbms_hint = os.getenv("M3_LIVE_DBMS", "").strip() or None
+    body = os.getenv("M3_LIVE_BODY")
+
+    return {
+        "target_url": target_url,
+        "origin": origin,
+        "parameter_name": param_name,
+        "method": method,
+        "parameter_location": location,
+        "dbms_hint": dbms_hint,
+        "body": body,
+    }
+
+
+def _build_materializer(
+    cfg: dict,
+) -> tuple[InMemoryRequestMaterializer, str | None, str | None, str | None]:
+    materializer = InMemoryRequestMaterializer()
+    body = cfg["body"]
+    if not body:
+        return materializer, None, None, None
+
+    parsed = urlsplit(str(cfg["target_url"]))
+    req_path = f"{parsed.path or '/'}{f'?{parsed.query}' if parsed.query else ''}"
+    content_type = (
+        "application/json"
+        if cfg["parameter_location"] == InputLocation.JSON_BODY
+        else "application/x-www-form-urlencoded"
+    )
+    raw_http = (
+        f"{cfg['method']} {req_path} HTTP/1.1\r\n"
+        f"Host: {parsed.netloc}\r\n"
+        f"Content-Type: {content_type}\r\n"
+        f"Content-Length: {len(body.encode('utf-8'))}\r\n"
+        f"\r\n{body}"
+    )
+    materializer.register_raw_request("live-req-001", raw_http)
+    materializer.register_headers("live-hdr-001", {"Content-Type": content_type})
+    materializer.register_body("live-body-001", body)
+    return materializer, "live-req-001", "live-hdr-001", "live-body-001"
 
 
 @LIVE_M3_REQUIRED
 @async_test
 async def test_live_m3_sqlmap_standalone_on_api_target():
     _ensure_sqlmap_available()
-    target_url, origin = _live_target_url_and_scope()
-    materializer = InMemoryRequestMaterializer()
+    cfg = _live_target_config()
+    materializer, req_ref, hdr_ref, body_ref = _build_materializer(cfg)
+    origin = str(cfg["origin"])
+    target_url = str(cfg["target_url"])
+    method = str(cfg["method"])
 
     http_adapter = HttpBaselineAdapter(
         authorized_scope=[origin],
@@ -71,12 +117,16 @@ async def test_live_m3_sqlmap_standalone_on_api_target():
     )
     baseline = await http_adapter.execute(
         HttpRequestCapabilityInput(
+            request_artifact_ref=req_ref,
+            headers_ref=hdr_ref,
+            body_ref=body_ref,
             target_url=target_url,
-            method="GET",
+            method=method,  # type: ignore[arg-type]
             sample_count=2,
             timeout_seconds=15,
         )
     )
+    print(f"\n[LIVE M3] baseline_ready={baseline.baseline_ready}, status={baseline.http_status}")
     assert baseline.execution_status == CapabilityExecutionStatus.COMPLETED
     assert baseline.reachable is True
     assert baseline.baseline_ready is True
@@ -89,15 +139,21 @@ async def test_live_m3_sqlmap_standalone_on_api_target():
     )
     result = await sqli_adapter.execute(
         SqliDetectionCapabilityInput(
+            request_artifact_ref=req_ref,
             target_url=target_url,
-            method="GET",
-            parameter_name="id",
-            parameter_location=InputLocation.QUERY,
+            method=method,  # type: ignore[arg-type]
+            parameter_name=str(cfg["parameter_name"]),
+            parameter_location=cfg["parameter_location"],  # type: ignore[arg-type]
             baseline_artifact_refs=baseline.artifact_refs,
             techniques=[SQLiTechnique.ERROR, SQLiTechnique.BOOLEAN, SQLiTechnique.UNION],
+            dbms_hint=cfg["dbms_hint"],  # type: ignore[arg-type]
             timeout_seconds=120,
         ),
         baseline=baseline,
+    )
+    print(
+        f"[LIVE M3] status={result.detection_status}, dbms={result.dbms_identified}, "
+        f"confirmed={result.confirmed_techniques}, proofs={len(result.proofs)}"
     )
     assert result.execution_status == CapabilityExecutionStatus.COMPLETED
     assert result.artifact_refs
@@ -107,7 +163,13 @@ async def test_live_m3_sqlmap_standalone_on_api_target():
 @async_test
 async def test_live_e2e_stage_b_to_m3_executor_on_api_target():
     _ensure_sqlmap_available()
-    target_url, origin = _live_target_url_and_scope()
+    cfg = _live_target_config()
+    materializer, req_ref, _hdr_ref, _body_ref = _build_materializer(cfg)
+    origin = str(cfg["origin"])
+    target_url = str(cfg["target_url"])
+    method = str(cfg["method"])
+    location = cfg["parameter_location"]
+
     handoff = {
         "plan": {
             "plan_id": "PLAN-LIVE-001",
@@ -135,7 +197,7 @@ async def test_live_e2e_stage_b_to_m3_executor_on_api_target():
                         "risk_profile": "LOW",
                         "max_requests": 150,
                         "timeout_seconds": 120,
-                        "dbms_hint": None,
+                        "dbms_hint": cfg["dbms_hint"],
                     },
                     "stop_conditions": ["VERIFIED_PROOF_FOUND", "TARGET_UNSTABLE", "RATE_LIMITED"],
                     "max_requests": 150,
@@ -145,17 +207,26 @@ async def test_live_e2e_stage_b_to_m3_executor_on_api_target():
             ],
         },
         "resolved_target": {
-            "endpoint": {"ref": "a" * 12, "method": "GET", "url": target_url},
-            "input": {"ref": "INP-001", "parameter": "id", "location": "QUERY"},
-            "request_template_ref": None,
+            "endpoint": {"ref": "a" * 12, "method": method, "url": target_url},
+            "input": {
+                "ref": "INP-001",
+                "parameter": str(cfg["parameter_name"]),
+                "location": location.value,  # type: ignore[union-attr]
+            },
+            "request_template_ref": req_ref,
             "auth_ref": None,
         },
     }
     executor = ValidationPlanExecutor(
         authorized_scope=[origin],
         policy=ExecutionPolicy(),
+        materializer=materializer,
     )
     verdict = await executor.execute_handoff(handoff)
+    print(
+        f"\n[LIVE E2E] outcome={verdict.outcome}, stop={verdict.stop_reason}, "
+        f"dbms={verdict.dbms_identified}, confirmed={verdict.confirmed_techniques}"
+    )
     assert verdict.outcome in {
         ValidationOutcome.CONFIRMED,
         ValidationOutcome.NOT_CONFIRMED,
