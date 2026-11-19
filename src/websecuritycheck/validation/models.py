@@ -170,3 +170,45 @@ class SqliDetectionCapabilityOutput(StrictModel):
     proofs: list[SQLiProof] = Field(default_factory=list)
     artifact_refs: list[str] = Field(default_factory=list)
     error_code: str | None = None
+
+
+class ValidationOutcome(StrEnum):
+    """Terminal validation outcome matching ``tactics/sqli/sqli_testing.yaml``."""
+
+    CONFIRMED = "CONFIRMED"
+    NOT_CONFIRMED = "NOT_CONFIRMED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+    ERROR = "ERROR"
+    UNSUPPORTED = "UNSUPPORTED"
+    POLICY_BLOCKED = "POLICY_BLOCKED"
+
+
+class TestCaseExecutionRecord(StrictModel):
+    """Execution record for a single planned test case."""
+
+    __test__ = False
+
+    test_case_id: str = Field(min_length=1)
+    tactic_step_ref: str = Field(min_length=1)
+    capability_id: str = Field(min_length=1)
+    status: Literal["EXECUTED", "SKIPPED"]
+    skip_reason: str | None = None
+    http_output: HttpRequestCapabilityOutput | None = None
+    sqli_output: SqliDetectionCapabilityOutput | None = None
+    triggered_stop_conditions: list[str] = Field(default_factory=list)
+
+
+class PlanExecutionResult(StrictModel):
+    """Aggregate Module 3 verdict and audit trail for one executed test plan."""
+
+    plan_id: str = Field(min_length=1)
+    hypothesis_ref: str = Field(min_length=1)
+    outcome: ValidationOutcome
+    stop_reason: str | None = None
+    dbms_identified: str | None = None
+    tested_techniques: list[SQLiTechnique] = Field(default_factory=list)
+    confirmed_techniques: list[SQLiTechnique] = Field(default_factory=list)
+    proofs: list[SQLiProof] = Field(default_factory=list)
+    artifact_refs: list[str] = Field(default_factory=list)
+    case_results: list[TestCaseExecutionRecord] = Field(default_factory=list)
+    estimated_requests_budget_used: int = Field(default=0, ge=0)

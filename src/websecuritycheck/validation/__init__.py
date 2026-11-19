@@ -1,5 +1,6 @@
 """Module 3 validation capability adapters and deterministic proof verifiers."""
 
+from .executor import ValidationPlanExecutor
 from .http_baseline import HttpBaselineAdapter
 from .models import (
     SUPPORTED_SQLI_LOCATIONS,
@@ -7,11 +8,14 @@ from .models import (
     DetectionStatus,
     HttpRequestCapabilityInput,
     HttpRequestCapabilityOutput,
+    PlanExecutionResult,
     RiskProfile,
     SqliDetectionCapabilityInput,
     SqliDetectionCapabilityOutput,
     SQLiProof,
     SQLiTechnique,
+    TestCaseExecutionRecord,
+    ValidationOutcome,
 )
 from .resolvers import (
     InMemoryRequestMaterializer,
@@ -31,6 +35,7 @@ __all__ = [
     "HttpRequestCapabilityOutput",
     "InMemoryRequestMaterializer",
     "MaterializedRequest",
+    "PlanExecutionResult",
     "RequestMaterializerProtocol",
     "ResolvedAuthContext",
     "RiskProfile",
@@ -39,5 +44,8 @@ __all__ = [
     "SqliDetectionCapabilityInput",
     "SqliDetectionCapabilityOutput",
     "SqlmapDetectionAdapter",
+    "TestCaseExecutionRecord",
+    "ValidationOutcome",
+    "ValidationPlanExecutor",
     "verify_sqli_proofs",
 ]
