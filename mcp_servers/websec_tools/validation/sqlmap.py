@@ -600,9 +600,11 @@ def parse_sqlmap_output(
     )
     waf_detected = bool(
         "waf/ips identified" in lowered_all
-        or "protected by some kind of waf/ips" in lowered_all
         or "heuristics detected web application firewall" in lowered_all
-        or "waf/ips protection" in lowered_all
+        or re.search(
+            r"(?<!checking if the )(?:target is|appears to be) protected by some kind of waf/ips",
+            lowered_all,
+        )
     )
     rate_limited = bool(
         "http error codes detected during run:\n429" in lowered_all

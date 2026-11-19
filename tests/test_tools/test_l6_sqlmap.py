@@ -260,6 +260,8 @@ async def test_detect_sqli_supports_bounded_boundary_level_and_detects_http_500(
     async def fake_runner(argv: list[str], timeout: float) -> tuple[int, bytes, bytes]:
         seen_argv.extend(argv)
         stdout = (
+            "[INFO] checking if the target is protected by some kind of WAF/IPS\n"
+            "[INFO] target URL content is stable\n"
             "[WARNING] HTTP error codes detected during run:\n"
             "500 (Internal Server Error) - 13 times\n"
         )
@@ -278,6 +280,7 @@ async def test_detect_sqli_supports_bounded_boundary_level_and_detects_http_500(
     assert seen_argv[seen_argv.index("-p") + 1] == "q"
     assert res["data"]["level_used"] == 3
     assert res["data"]["server_error_detected"] is True
+    assert res["data"]["waf_or_filter_detected"] is False
 
     with pytest.raises(ToolError) as exc_info:
         await sqlmap.detect_sqli(
