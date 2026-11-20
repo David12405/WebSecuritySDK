@@ -9,8 +9,14 @@ from __future__ import annotations
 import tempfile
 
 import pytest
+from pydantic import ValidationError
 
-from websecuritycheck.tactic_planning.contracts import SQLiSafetyPolicy, SQLiTechnique
+from websecuritycheck.tactic_planning.contracts import (
+    HttpRequestInput,
+    SQLiSafetyPolicy,
+    SQLiTechnique,
+    validate_capability_arguments,
+)
 from websecuritycheck.tactic_planning.stage_a import FakeTacticAuthor, FileTacticRegistry
 from websecuritycheck.tactic_planning.stage_b import (
     FakePlanner,
@@ -216,6 +222,40 @@ def test_budget_over_ceiling_rejected():
     plan = _assemble(draft, context)
     violations = validate_plan(plan, context)
     assert any("budget" in v for v in violations)
+
+
+def test_http_request_requires_at_least_two_baseline_samples():
+    context = planning_context()
+    draft = valid_plan_draft()
+    draft.test_cases[0].sample_count = 1
+    plan = _assemble(draft, context)
+    violations = validate_plan(plan, context)
+    assert any("sample_count 1 must be at least 2" in v for v in violations)
+
+
+def test_http_request_contract_rejects_a_single_baseline_sample():
+    violations = validate_capability_arguments(
+        "HTTP_REQUEST", {"sample_count": 1, "timeout_seconds": 10}
+    )
+    assert violations
+
+    with pytest.raises(ValidationError):
+        HttpRequestInput(
+            request_template_ref="REQTPL-001",
+            sample_count=1,
+            timeout_seconds=10,
+            policy_context_ref="POLICY-001",
+        )
+
+
+def test_http_request_sample_count_cannot_exceed_request_budget():
+    context = planning_context()
+    draft = valid_plan_draft()
+    draft.test_cases[0].sample_count = 3
+    draft.test_cases[0].max_requests = 2
+    plan = _assemble(draft, context)
+    violations = validate_plan(plan, context)
+    assert any("sample_count 3 exceeds max_requests 2" in v for v in violations)
 
 
 def test_time_without_baseline_dependency_rejected():
