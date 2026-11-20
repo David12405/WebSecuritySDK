@@ -123,8 +123,12 @@ class TestCaseDraft(DraftModel):
         default_factory=list,
         description="Positions of earlier test cases in this list this one depends on.",
     )
+    # ge=1 here, not ge=2 like the HTTP_REQUEST contract: a single-sample draft is
+    # accepted so validation can reject it with a readable budget violation instead
+    # of a raw ValidationError. max_requests defaults high enough to cover the
+    # default sample_count - a baseline case must afford every sample it asks for.
     sample_count: int = Field(default=2, ge=1, le=5)
-    max_requests: int = Field(default=1, ge=1)
+    max_requests: int = Field(default=2, ge=1)
     timeout_seconds: int = Field(default=15, ge=1)
     expected_signals: list[ExpectedSignal] = Field(default_factory=list)
     required_control_observations: int = Field(default=1, ge=0)

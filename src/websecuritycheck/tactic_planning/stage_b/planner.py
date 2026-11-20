@@ -198,6 +198,10 @@ TIME detection:
 
 Budgets:
 - max_requests and timeout_seconds must stay at or below the ceilings given.
+- An HTTP_REQUEST case needs "sample_count" of at least 2: stability is measured by
+  comparing samples, so a single sample can never establish the baseline.
+- "sample_count" must not exceed that case's own "max_requests" - a case cannot send
+  more samples than its request budget allows.
 
 expected_terminal_outcomes:
 - These are the final verdicts the execution module could return, chosen ONLY from:

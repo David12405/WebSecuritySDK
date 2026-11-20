@@ -259,6 +259,19 @@ def _gate_budgets(plan: StructuredTestPlan, context: PlanningContext) -> list[st
             f"budget: aggregate {total} exceeds execution policy request_budget {http_budget}"
         )
     for case in plan.test_cases:
+        if case.capability_id == "HTTP_REQUEST":
+            sample_count = case.capability_arguments.get("sample_count")
+            if isinstance(sample_count, int):
+                if sample_count < 2:
+                    out.append(
+                        f"budget: {case.test_case_id} HTTP_REQUEST sample_count "
+                        f"{sample_count} must be at least 2"
+                    )
+                if sample_count > case.max_requests:
+                    out.append(
+                        f"budget: {case.test_case_id} HTTP_REQUEST sample_count "
+                        f"{sample_count} exceeds max_requests {case.max_requests}"
+                    )
         if case.technique is not None:
             ceiling = policy.max_requests_for(case.technique)
             if case.max_requests > ceiling:

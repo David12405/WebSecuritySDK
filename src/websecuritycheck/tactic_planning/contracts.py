@@ -116,7 +116,7 @@ class SQLiSafetyPolicy(StrictModel):
 class HttpRequestArgs(StrictModel):
     """The only HTTP_REQUEST fields a planner is allowed to choose."""
 
-    sample_count: int = Field(default=2, ge=1, le=5)
+    sample_count: int = Field(default=2, ge=2, le=5)
     timeout_seconds: int = Field(default=15, ge=1)
 
 
@@ -124,7 +124,7 @@ class HttpRequestInput(StrictModel):
     """Full HTTP_REQUEST@1.0 input; code adds the opaque references."""
 
     request_template_ref: str = Field(min_length=1)
-    sample_count: int = Field(default=2, ge=1, le=5)
+    sample_count: int = Field(default=2, ge=2, le=5)
     timeout_seconds: int = Field(default=15, ge=1)
     policy_context_ref: str = Field(min_length=1)
 
