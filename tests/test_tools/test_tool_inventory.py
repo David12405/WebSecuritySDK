@@ -21,6 +21,7 @@ TOOL_COVERAGE = {
     "read_source_file": "source",
     "search_source": "source",
     "analyze_source": "opengrep",
+    "detect_sqli": "sqlmap",
 }
 
 
@@ -40,4 +41,5 @@ def test_tool_inventory_has_no_unclassified_entries():
         "browser",
         "source",
         "opengrep",
+        "sqlmap",
     }

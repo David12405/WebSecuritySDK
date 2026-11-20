@@ -45,7 +45,7 @@ required_context:
   - name: "expected_signals"
     source: "M2.ValidationCapabilityRequirement"
     required: false
-    description: "Expected validation signals (e.g. SQL_SYNTAX_ERROR, BOOLEAN_RESPONSE_DIFF, TIMING_DIFF)"
+    description: "Expected validation signals (e.g. SQL_SYNTAX_ERROR, BOOLEAN_RESPONSE_DIFF, UNION_MARKER_REFLECTION, TIMING_DIFF)"
   - name: "execution_policy"
     source: "M1.ExecutionPolicy"
     required: true
@@ -103,9 +103,11 @@ steps:
     goal: "Establish reproducible baseline behavior and target stability before SQLi testing"
     recommended_capability: "HTTP_REQUEST"
     guidance: >-
-      Call HTTP_REQUEST (default 2 samples) preferring request_artifact_ref and auth_ref when present.
-      Inspect baseline_ready, target_stable, auth_failure_detected, rate_limited, and waf_or_filter_detected.
-      A single HTTP 200 response alone does not establish response stability.
+      Call HTTP_REQUEST with sample_count >= 2 (default 2, never 1 for baseline) preferring
+      request_artifact_ref and auth_ref when present. Inspect baseline_ready, target_stable,
+      auth_failure_detected, rate_limited, and waf_or_filter_detected. A single HTTP 200 response
+      alone does not establish response stability (sample_count=1 always yields target_stable=null
+      and baseline_ready=false).
     suggested_inputs:
       sample_count: 2
       timeout_seconds: 15
@@ -125,8 +127,9 @@ steps:
     recommended_capability: "SQLI_DETECTION"
     guidance: >-
       Invoke SQLI_DETECTION passing baseline_artifact_refs, parameter_name, parameter_location, and
-      request_artifact_ref (if available). Prefer [ERROR, BOOLEAN, UNION] unless grounded context narrows
-      it; let the underlying Adapter/tool handle payload construction and DBMS detection. Never treat a
+      request_artifact_ref (if available). Pass dbms_hint=null when unknown (never pass placeholder
+      strings like "--"). Prefer [ERROR, BOOLEAN, UNION] unless grounded context narrows it; let
+      the underlying Adapter/tool handle payload construction and DBMS detection. Never treat a
       heuristic_signal_detected=true alone as confirmation.
     suggested_inputs:
       techniques:
@@ -157,7 +160,8 @@ steps:
     guidance: >-
       Run TIME detection ONLY if policy allows it, target_stable is true, remaining budget is sufficient,
       and either TIMING_DIFF is in expected_signals, heuristic_signal_detected was true, or hypothesis
-      confidence is MEDIUM/HIGH. Hypothesis confidence alone never forces TIME testing if timing is unstable.
+      confidence is MEDIUM/HIGH. Pass dbms_hint=null when unknown (never "--"). Hypothesis confidence
+      alone never forces TIME testing if timing is unstable.
     suggested_inputs:
       techniques:
         - "TIME"

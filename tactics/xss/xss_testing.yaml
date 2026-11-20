@@ -103,8 +103,9 @@ steps:
     goal: "Establish baseline HTTP response, CSP presence, auth validity, and stability"
     recommended_capability: "HTTP_REQUEST"
     guidance: >-
-      Call HTTP_REQUEST (2 samples) to check baseline_ready and target_stable. If parameter_location
-      is DOM and HTTP baseline is ready, proceed directly to optional_browser_dom_verification.
+      Call HTTP_REQUEST with sample_count >= 2 (default 2, never 1 for baseline) to check
+      baseline_ready and target_stable. If parameter_location is DOM and HTTP baseline is ready,
+      proceed directly to optional_browser_dom_verification.
     suggested_inputs:
       sample_count: 2
       timeout_seconds: 15
