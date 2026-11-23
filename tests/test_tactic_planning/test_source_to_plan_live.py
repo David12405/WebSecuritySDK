@@ -24,6 +24,17 @@ Set WEBSEC_REPORT_PATH to also emit a printable HTML report of every plan:
     WEBSEC_REPORT_PATH="$(pwd)/source_to_plan_report.html" \
     python -m pytest tests/test_tactic_planning/test_source_to_plan_live.py -s
 
+WEBSEC_TARGETS picks which captured Cloudflare targets to plan against, as a
+comma-separated list of `TARGET_CASES` names; it defaults to `api`. Each target
+needs its `request_<name>.json` fixture, which `test_pipeline_capture.py` writes
+on a live capture run. `basic` carries no SQL-injection rule, so it skips rather
+than fails - this vertical only plans SQLi:
+
+    WEBSEC_TARGETS=api,spa ... python -m pytest ... -s
+
+With more than one target WEBSEC_REPORT_PATH gains a per-target suffix, so the
+runs do not overwrite each other's report.
+
 Without RUN_LIVE_M1_M2 it skips, so the default offline suite is unaffected.
 """
 
@@ -36,6 +47,7 @@ from pathlib import Path
 
 import pytest
 from test_analysis.m1_m2_live_support import (
+    TARGET_CASES,
     LiveDependencyError,
     resolve_primary_ruleset,
     trust_policy,
@@ -76,9 +88,32 @@ from ._factories import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REQUEST_API = (
-    REPO_ROOT / "tests" / "test_analysis" / "captured_envelopes" / "request_api.json"
-)
+CAPTURE_DIR = REPO_ROOT / "tests" / "test_analysis" / "captured_envelopes"
+
+
+def _selected_targets() -> list[str]:
+    """Target names from WEBSEC_TARGETS, defaulting to the one captured target."""
+    known = {case.name for case in TARGET_CASES}
+    raw = os.getenv("WEBSEC_TARGETS", "api")
+    names = [name.strip() for name in raw.split(",") if name.strip()]
+    unknown = sorted(set(names) - known)
+    if unknown:
+        raise ValueError(
+            f"WEBSEC_TARGETS names unknown target(s) {unknown}; "
+            f"choose from {sorted(known)}"
+        )
+    return names
+
+
+def _report_path_for(target: str, selected: list[str]) -> Path | None:
+    """Per-target report path, so a multi-target run keeps every report."""
+    raw = os.getenv("WEBSEC_REPORT_PATH")
+    if not raw:
+        return None
+    path = Path(raw)
+    if len(selected) == 1:
+        return path
+    return path.with_name(f"{path.stem}_{target}{path.suffix}")
 
 LIVE_REQUIRED = pytest.mark.skipif(
     os.getenv("RUN_LIVE_M1_M2") != "1",
@@ -102,14 +137,34 @@ def _load_dotenv() -> None:
 @pytest.mark.live_m1_m2
 @pytest.mark.opengrep_cli
 @LIVE_REQUIRED
-def test_source_to_plan_api(tmp_path: Path) -> None:
+@pytest.mark.parametrize("target", _selected_targets())
+def test_source_to_plan(target: str, tmp_path: Path) -> None:
+    selected = _selected_targets()
+    case = next(item for item in TARGET_CASES if item.name == target)
+
+    # This vertical plans SQLi only, so a target whose ruleset cannot produce a
+    # SQL-injection finding has nothing to plan - skip instead of failing the
+    # "should yield a SQL_INJECTION hypothesis" assertion below.
+    if not any("sql-injection" in rule for rule in case.expected_rule_ids):
+        pytest.skip(
+            f"target {target} carries no SQL-injection rule "
+            f"({sorted(case.expected_rule_ids)}); nothing for this SQLi vertical to plan"
+        )
+
+    request_path = CAPTURE_DIR / f"request_{target}.json"
+    if not request_path.exists():
+        pytest.skip(
+            f"no captured request at {request_path}; run test_pipeline_capture.py "
+            f"with RUN_LIVE_M1_M2=1 to capture target {target} first"
+        )
+
     try:
         ruleset = resolve_primary_ruleset()
     except LiveDependencyError as exc:
         pytest.skip(str(exc))
 
     request = Module2AnalysisRequest.model_validate(
-        json.loads(REQUEST_API.read_text(encoding="utf-8"))
+        json.loads(request_path.read_text(encoding="utf-8"))
     )
     if not request.source_repo_path or not Path(request.source_repo_path).is_dir():
         pytest.skip(
@@ -134,7 +189,7 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
         for h in generation.hypotheses
         if h.vulnerability_category == VulnerabilityCategory.SQL_INJECTION
     ]
-    assert sqli, "the Cloudflare api target should yield a SQL_INJECTION hypothesis"
+    assert sqli, f"the Cloudflare {target} target should yield a SQL_INJECTION hypothesis"
 
     # --- Stage A/B: author the tactic and plan each hypothesis ---------------- #
     # Defaults to the real LLM (gpt-4o) and the official OWASP WSTG source.
@@ -158,7 +213,8 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
     adapter = GithubWstgAdapter() if wstg_source == "github" else RecordedWstgAdapter(WSTG_DIR)
     registry = FileTacticRegistry(tmp_path / "registry")
     safety = enabled_policy()
-    print(f"[source->plan] author/planner={'gpt-4o' if use_llm else 'deterministic'}, "
+    print(f"[source->plan] target={target}, "
+          f"author/planner={'gpt-4o' if use_llm else 'deterministic'}, "
           f"wstg={wstg_source}")
 
     handoffs = []
@@ -192,11 +248,11 @@ def test_source_to_plan_api(tmp_path: Path) -> None:
     assert len(handoffs) == len(sqli)
 
     # Full live run -> a printable HTML report for review, when a path is given.
-    report_path = os.getenv("WEBSEC_REPORT_PATH")
+    report_path = _report_path_for(target, selected)
     if report_path:
         scope = request.target_model.scope_rules
         html = render_report_html(
             handoffs, target=str(scope.target) if scope else None
         )
-        Path(report_path).write_text(html, encoding="utf-8")
+        report_path.write_text(html, encoding="utf-8")
         print(f"\n[source->plan] wrote HTML report for {len(handoffs)} plan(s) to {report_path}")
